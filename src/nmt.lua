@@ -26,13 +26,13 @@ if kwargs.gpuid >= 0 then
   end
 end
 
-print('Experiment Setting:\n', kwargs)
+print('Experiment Setting: ', kwargs)
 
 local loader = DataLoader(kwargs)
-if kwargs.attention then
-    require 'model.NMT'
-else
+if kwargs.attention == 1 then
     require 'model.NMTA'
+else
+    require 'model.NMT'
 end
 
 local model = nn.NMT(kwargs)
@@ -80,7 +80,7 @@ function train()
         if epoch > kwargs.learning_rate_decay_after then
             kwargs.learning_rate = kwargs.learning_rate * kwargs.decay_rate
         end
-        
+
         loader:read("valid")
         local valid_nll = 0
         local num_batches = loader:num_batches()
@@ -89,7 +89,7 @@ function train()
             valid_nll = valid_nll + model:forward({s,t}, tn:view(-1))
             if i % 50 == 0 then collectgarbage() end
         end
-        
+
         prev_valid_nll = valid_nll
         print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/num_batches)))
         local save_file = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/num_batches)
