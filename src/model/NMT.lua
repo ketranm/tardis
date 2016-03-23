@@ -231,7 +231,7 @@ function NMT:translate(x, beam_size, max_length)
         complete_hyps[hypo] = scores[k][1]/(T-1)
     end
     local n_best = {}
-    for hypo in pairs(complete_hyps) do nbest[#n_best + 1] = hypo end
+    for hypo in pairs(complete_hyps) do n_best[#n_best + 1] = hypo end
     -- sort the result and pick the best one
     table.sort(n_best, function(s1, s2)
         return complete_hyps[s1] > complete_hyps[s2] or complete_hyps[s1] > complete_hyps[s2] and s1 > s2

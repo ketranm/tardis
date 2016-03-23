@@ -19,6 +19,7 @@ else
 end
 
 print('Experiment Setting: ', kwargs)
+
 if kwargs.attention == 1 then
     require 'model.NMTA'
 else
@@ -26,6 +27,7 @@ else
 end
 
 local model = nn.NMT(kwargs)
+
 if kwargs.gpuid >= 0 then
     model:cuda()
 end
@@ -57,9 +59,9 @@ function train()
         local num_batches = loader:num_batches()
         print('number of batches: ', num_batches)
         for i = 1, num_batches do
-            local s, t, tn = prepro(loader:next_batch())
-            nll = nll + model:forward({s,t}, tn:view(-1))
-            model:backward({s,t},tn:view(-1))
+            local s, t, next_t = prepro(loader:next_batch())
+            nll = nll + model:forward({s,t}, next_t:view(-1))
+            model:backward({s,t},next_t:view(-1))
             model:update(kwargs.learning_rate)
             --model:clearState()
             if i % kwargs.report_every == 0 then
@@ -74,23 +76,45 @@ function train()
         end
 
         loader:read("valid")
+        model:evaluate()
         local valid_nll = 0
         local num_batches = loader:num_batches()
         for i = 1, num_batches do
-            local s,t,tn = prepro(loader:next_batch())
-            valid_nll = valid_nll + model:forward({s,t}, tn:view(-1))
+            local s,t,next_t = prepro(loader:next_batch())
+            valid_nll = valid_nll + model:forward({s,t}, next_t:view(-1))
             if i % 50 == 0 then collectgarbage() end
         end
 
         prev_valid_nll = valid_nll
         print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/num_batches)))
-        local save_file = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/num_batches)
-        paths.mkdir(paths.dirname(save_file))
-        print('save model to: ' .. save_file)
+        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/num_batches)
+        paths.mkdir(paths.dirname(checkpoint))
+        print('save model to: ' .. checkpoint)
         print('learning_rate: ', kwargs.learning_rate)
-        model:save_model(save_file)
+        model:save_model(checkpoint)
 
     end
 end
 
-train()
+local eval = kwargs.model_file and kwargs.text_file
+
+if not eval then
+    -- training mode
+    train()
+else
+    -- use dictionary
+    model:use_vocab(loader.vocab)
+    model:evaluate()
+    model:load_model(kwargs.model_file)
+    local file = io.open('translation.txt', 'w')
+    io.output(file)
+    for line in io.lines(kwargs.text_file) do
+        local translation = model:translate(line, kwargs.beam_size)
+        --print(translation)
+        io.write(translation .. '\n')
+        io.flush()
+    end
+    io.close(file)
+end
+
+
