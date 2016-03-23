@@ -73,18 +73,22 @@ function DataLoader:num_batches()
 end
 
 function DataLoader:next_batch()
+    --return the next mini-batch, shuffle data in a chunk
     assert(self.cur_batch < self.cur_tracker.num_batches)
     self.cur_batch = self.cur_batch + 1
     if self.batch_idx < self.batch_idx_max then
         self.batch_idx = self.batch_idx + 1
-        return self.data[self.batch_idx]
+        local idx = self.shuffled_idx[self.batch_idx]
+        return self.data[idx]
     else
         self.chunk_idx = self.chunk_idx + 1
         self.data = torch.load(self.cur_tracker.tensor_files[self.chunk_idx])
         assert(#self.data > 0)
+        self.shuffled_idx = torch.randperm(#self.data)
         self.batch_idx = 1
         self.batch_idx_max = #self.data
-        return self.data[1]
+        local idx = self.shuffled_idx[self.batch_idx]
+        return self.data[idx]
     end
 end
 
@@ -201,7 +205,6 @@ function DataLoader:text_to_tensor(text_files, tensor_prefix, chunk_size, tracke
             table.insert(tracker.tensor_files, tensor_out_file)
             local nbatches = self:_create_chunk(buckets, tensor_out_file)
             tracker.num_batches = tracker.num_batches + nbatches
-            -- save chunk
             buckets = {}
         end
     end
