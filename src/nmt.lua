@@ -10,25 +10,15 @@ local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
 
 if kwargs.gpuid >= 0 then
-  local ok, cunn = pcall(require, 'cunn')
-  local ok2, cutorch = pcall(require, 'cutorch')
-  if not ok then print('package cunn not found!') end
-  if not ok2 then print('package cutorch not found!') end
-  if ok and ok2 then
-    print('using CUDA on GPU ' .. kwargs.gpuid .. '...')
-    cutorch.setDevice(kwargs.gpuid + 1) -- note +1 to make it 0 indexed! sigh lua
+    require 'cunn'
+    require 'cutorch'
+    cutorch.setDevice(kwargs.gpuid + 1)
     cutorch.manualSeed(kwargs.seed or 42)
-  else
-    print('If cutorch and cunn are installed, your CUDA toolkit may be improperly configured.')
-    print('Check your CUDA toolkit installation, rebuild cutorch and cunn, and try again.')
-    print('Falling back on CPU mode')
-    kwargs.gpuid = -1 -- overwrite user setting
-  end
+else
+    kwargs.gpuid = -1
 end
 
 print('Experiment Setting: ', kwargs)
-
-local loader = DataLoader(kwargs)
 if kwargs.attention == 1 then
     require 'model.NMTA'
 else
@@ -39,6 +29,8 @@ local model = nn.NMT(kwargs)
 if kwargs.gpuid >= 0 then
     model:cuda()
 end
+
+local loader = DataLoader(kwargs)
 
 -- prepare data
 function prepro(batch)
