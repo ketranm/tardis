@@ -138,11 +138,14 @@ function layer:backward(input, gradOutput, scale)
     local grad_Wh1 = grad_Wh[{{}, {1, 2 * H}}]
     local grad_Wh2 = grad_Wh[{{}, {2 * H + 1, 3 * H}}]
     local grad_b = self.gradBias
-    -- TODO: carry on state
 
-    grad_h0:resizeAs(h0):zero()
+    if not self._init_grad_state then
+        -- reset gradient
+        grad_h0:resizeAs(h0):zero()
+    end
+
     grad_x:resizeAs(x):zero()
-    local grad_next_h = self.grad_next_h:resizeAs(h0):zero()
+    local grad_next_h = self.grad_next_h:resizeAs(h0):copy(grad_h0)
     for t = T, 1, -1 do
         local next_h = h[{{}, t}]
         local buffer_t = self.buffer[{{}, t}]
