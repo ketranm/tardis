@@ -13,8 +13,8 @@ local model_utils = require 'model.model_utils'
 function Seq2seq.create(kwargs)
     local self = {}
     setmetatable(self, Seq2seq)
-    -- will clean up later
     local kwargs = kwargs;
+
     local dtype = 'torch.FloatTensor'
     kwargs.gpuid = kwargs.gpuid or -1
     if kwargs.gpuid >= 0 then dtype = 'torch.CudaTensor' end
@@ -39,7 +39,6 @@ function Seq2seq.create(kwargs)
 
     -- get parameters and gradients for optimization
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.layer)
-    self.num_params = self.params:nElement()
     self.max_norm = kwargs.max_norm or 5
     self.records = {}
     return self
@@ -68,9 +67,11 @@ end
 
 
 function Seq2seq:backward(input, target)
+    -- zero out gradients
     self.gradParams:zero()
+
     -- unpack records
-    local output_encoder, output_decoder, log_prob = self.records[1], self.records[2], self.records[3]
+    local output_encoder, output_decoder, log_prob = unpack(self.records)
     local grad_encoder = self.grad_encoder
 
     local grad_loss = self.criterion:backward(log_prob, target)
@@ -148,11 +149,6 @@ function Seq2seq:save_model(filename)
 end
 
 
-function Seq2seq:paramcheck()
-    return self.num_params == self.params:nElement()
-end
-
-
 function Seq2seq:translate(x, beam_size, max_length)
     --[[Translate input sentence with beam search
     Args:
@@ -179,13 +175,12 @@ function Seq2seq:translate(x, beam_size, max_length)
     local output_encoder = self.encoder:updateOutput(x)
     local last_encoder_state = self.encoder:last_state()
 
-    --local scores = torch.Tensor():typeAs(x):resize(T, K):zero()
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hyps = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local prev_state = last_encoder_state
     local complete_hyps = {}
     for i = 1, T-1 do
-        self.decoder:init_state(last_encoder_state)
+        self.decoder:init_state(prev_state)
         local cur_y = hyps[i]:view(-1, 1)
         local output_encoder = self.decoder:forward(cur_y)
         local log_prob = self.layer:forward(output_encoder)
@@ -235,13 +230,13 @@ function Seq2seq:translate(x, beam_size, max_length)
         local hypo = self:_decode_string(hyps[{{}, k}])
         complete_hyps[hypo] = scores[k][1]/(T-1)
     end
-    local nbest = {}
-    for hypo in pairs(complete_hyps) do nbest[#nbest + 1] = hypo end
+    local n_best = {}
+    for hypo in pairs(complete_hyps) do nbest[#n_best + 1] = hypo end
     -- sort the result and pick the best one
-    table.sort(nbest, function(s1, s2)
+    table.sort(n_best, function(s1, s2)
         return complete_hyps[s1] > complete_hyps[s2] or complete_hyps[s1] > complete_hyps[s2] and s1 > s2
     end)
-    return nbest[1]
+    return n_best[1]
 end
 
 

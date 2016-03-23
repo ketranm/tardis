@@ -17,7 +17,7 @@ if kwargs.gpuid >= 0 then
   if ok and ok2 then
     print('using CUDA on GPU ' .. kwargs.gpuid .. '...')
     cutorch.setDevice(kwargs.gpuid + 1) -- note +1 to make it 0 indexed! sigh lua
-    --cutorch.manualSeed(kwargs.seed or 42)
+    cutorch.manualSeed(kwargs.seed or 42)
   else
     print('If cutorch and cunn are installed, your CUDA toolkit may be improperly configured.')
     print('Check your CUDA toolkit installation, rebuild cutorch and cunn, and try again.')
@@ -55,48 +55,29 @@ end
 
 function train()
     local exp = math.exp
-    local prev_valid_nll = math.huge
     for epoch = 1,kwargs.max_epoch do
         loader:read("train")
+        model:training()
         local nll = 0
         local num_batches = loader:num_batches()
         print('number of batches: ', num_batches)
         for i = 1, num_batches do
             local s, t, tn = prepro(loader:next_batch())
-            local cur_nll = model:forward({s,t}, tn:view(-1))
-
-            if cur_nll ~= cur_nll then
-                print('shit happen: ', cur_nll)
-                --print(model.params)
-                for j = 1, model.params:nElement() do
-                    x = model.params[i]
-                    if x ~= x then
-                        print("found the bitch!")
-                    end
-                end
-            else
-                nll = nll + cur_nll
-            end
-
+            nll = nll + model:forward({s,t}, tn:view(-1))
             model:backward({s,t},tn:view(-1))
             model:update(kwargs.learning_rate)
             --model:clearState()
-            if i % 20 == 0 then
-                if not model:paramcheck() then
-                    print('fucked up parameters')
-                end
+            if i % kwargs.report_every == 0 then
                 xlua.progress(i, num_batches)
                 print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
                 collectgarbage()
             end
         end
 
-        if prev_valid_nll > nll then
-            kwargs.learning_rate = kwargs.learning_rate * 0.6
+        if epoch > kwargs.learning_rate_decay_after then
+            kwargs.learning_rate = kwargs.learning_rate * kwargs.decay_rate
         end
-        prev_valid_nll = nll
-
-        --[[
+        
         loader:read("valid")
         local valid_nll = 0
         local num_batches = loader:num_batches()
@@ -108,9 +89,7 @@ function train()
         
         prev_valid_nll = valid_nll
         print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/num_batches)))
-        --]]
-
-        local save_file = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, nll/num_batches)
+        local save_file = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/num_batches)
         paths.mkdir(paths.dirname(save_file))
         print('save model to: ' .. save_file)
         print('learning_rate: ', kwargs.learning_rate)

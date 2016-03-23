@@ -167,11 +167,6 @@ function Seq2seq:save_model(filename)
 end
 
 
-function Seq2seq:paramcheck()
-    return self.num_params == self.params:nElement()
-end
-
-
 function Seq2seq:translate(x, beam_size, max_length)
     --[[Translate input sentence with beam search
     Args:
@@ -256,13 +251,13 @@ function Seq2seq:translate(x, beam_size, max_length)
         local hypo = self:_decode_string(hyps[{{}, k}])
         complete_hyps[hypo] = scores[k][1] / (T-1)
     end
-    local nbest = {}
-    for hypo in pairs(complete_hyps) do nbest[#nbest + 1] = hypo end
+    local n_best = {}
+    for hypo in pairs(complete_hyps) do nbest[#n_best + 1] = hypo end
     -- sort the result and pick the best one
-    table.sort(nbest, function(s1, s2)
+    table.sort(n_best, function(s1, s2)
         return complete_hyps[s1] > complete_hyps[s2] or complete_hyps[s1] > complete_hyps[s2] and s1 > s2
     end)
-    return nbest[1]
+    return n_best[1]
 end
 
 
