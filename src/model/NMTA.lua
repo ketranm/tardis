@@ -9,10 +9,10 @@ require 'model.Transducer'
 require 'model.Glimpse'
 local model_utils = require 'model.model_utils'
 
-local Seq2seq, parent = torch.class('nn.Seq2seq', 'nn.Module')
+local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
 
-function Seq2seq:__init(kwargs)
+function NMT:__init(kwargs)
     -- over write option
     kwargs.vocab_size = kwargs.source_vocab_size
     self.encoder = nn.Transducer(kwargs)
@@ -46,7 +46,7 @@ function Seq2seq:__init(kwargs)
 end
 
 
-function Seq2seq:forward(input, target)
+function NMT:forward(input, target)
     --[[Forward pass
     Args:
         input: a table of {x, y} where x = (batch_size, len_xs) Tensor and
@@ -69,7 +69,7 @@ function Seq2seq:forward(input, target)
 end
 
 
-function Seq2seq:backward(input, target)
+function NMT:backward(input, target)
     self.gradParams:zero()
     local output_encoder, output_decoder, context, log_prob = unpack(self.buffers)
 
@@ -90,7 +90,7 @@ function Seq2seq:backward(input, target)
 end
 
 
-function Seq2seq:update(learning_rate)
+function NMT:update(learning_rate)
     local grad_norm = self.gradParams:norm()
     local scale = learning_rate
     if grad_norm > self.max_norm then
@@ -100,18 +100,18 @@ function Seq2seq:update(learning_rate)
 end
 
 
-function Seq2seq:parameters()
+function NMT:parameters()
     return self.params
 end
 
 
-function Seq2seq:training()
+function NMT:training()
     self.encoder:training()
     self.decoder:training()
 end
 
 
-function Seq2seq:evaluate()
+function NMT:evaluate()
     self.encoder:evaluate()
     self.decoder:evaluate()
 end
@@ -126,7 +126,7 @@ function flat_to_rc(v, indices, flat_index)
 end
 
 
-function Seq2seq:_decode_string(x)
+function NMT:_decode_string(x)
     local ws = {}
     local vocab = self.target_vocab
     for i = 1, x:nElement() do
@@ -139,7 +139,7 @@ function Seq2seq:_decode_string(x)
 end
 
 
-function Seq2seq:_encode_string(x)
+function NMT:_encode_string(x)
     -- encode source sentence
     local xs = stringx.split(x)
     local xids = {}
@@ -152,7 +152,7 @@ function Seq2seq:_encode_string(x)
 end
 
 
-function Seq2seq:use_vocab(vocab)
+function NMT:use_vocab(vocab)
     self.source_vocab = vocab[1]
     self.target_vocab = vocab[2]
     self.id2word = {}
@@ -162,18 +162,18 @@ function Seq2seq:use_vocab(vocab)
 end
 
 
-function Seq2seq:load_model(filename)
+function NMT:load_model(filename)
     local params = torch.load(filename)
     self.params:copy(params)
 end
 
 
-function Seq2seq:save_model(filename)
+function NMT:save_model(filename)
     torch.save(filename, self.params)
 end
 
 
-function Seq2seq:translate(x, beam_size, max_length)
+function NMT:translate(x, beam_size, max_length)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence, (1, T) Tensor
@@ -186,8 +186,8 @@ function Seq2seq:translate(x, beam_size, max_length)
     local K = beam_size or 10
     local T = max_length or 50
 
-    x = self:_encode_string(x):typeAs(self.params)
-    x = x:expand(K, x:size(2))
+    x = self:_encode_string(x)
+    x = x:expand(K, x:size(2)):typeAs(self.params)
 
     local output_encoder = self.encoder:updateOutput(x)
     local last_encoder_state = self.encoder:last_state()
@@ -259,7 +259,7 @@ function Seq2seq:translate(x, beam_size, max_length)
 end
 
 
-function Seq2seq:clearState()
+function NMT:clearState()
     self.encoder:clearState()
     self.decoder:clearState()
     self.layer:clearState()
