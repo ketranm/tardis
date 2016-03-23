@@ -23,9 +23,9 @@ local kwargs = {vocab_size = 100000,
                 batch_norm = false}
 
 function tests.testForward()
-	-- generate example
+    -- generate example
 
-	local N = torch.random(20, 200)
+    local N = torch.random(20, 200)
     local T = torch.random(10, 50)
     local x = torch.range(1, N * T):reshape(N, T)
 
@@ -48,17 +48,16 @@ function tests.testForward()
     tester:assert(params:nElement() == num_params)
     tester:assert(grad_params:nElement() == num_params)
 
-    --print(params:nElement(), num_params, grad_params:nElement())
     local lt = nn.LookupTable(kwargs.vocab_size, kwargs.embedding_size)
     lt.weight:copy(trans.transducer:get(1).weight)
     local rnns = {}
-    
+
     local init_state = {}
 
     for i = 1, kwargs.num_layers do
-    	local c0 = torch.randn(N, kwargs.hidden_size)
-    	local h0 = torch.randn(N, kwargs.hidden_size)
-    	init_state[i] = {c0, h0}
+        local c0 = torch.randn(N, kwargs.hidden_size)
+        local h0 = torch.randn(N, kwargs.hidden_size)
+        init_state[i] = {c0, h0}
     end
 
     for i = 1, kwargs.num_layers do
@@ -79,7 +78,7 @@ function tests.testForward()
     end
     -- set state of transducer
     trans:init_state(init_state)
-    
+
     local wemb = lt:forward(x)  -- word embeddings
     local h = wemb
     for i = 1, kwargs.num_layers do
