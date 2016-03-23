@@ -5,7 +5,7 @@ require 'nn'
 local Seq2seq
 require 'util.DataLoader'
 
---torch.manualSeed(42)
+torch.manualSeed(42)
 local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
 
