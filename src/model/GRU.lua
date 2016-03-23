@@ -196,7 +196,7 @@ function layer:backward(input, gradOutput, scale)
         grad_Wx:addmm(scale, x[{{}, t}]:t(), grad_a)
         grad_Wh1:addmm(scale, prev_h:t(), grad_a[{{}, {1, 2 * H}}])
 
-        local grad_a_sum = self.buffer_b:resize(H):sum(grad_a, 1)
+        local grad_a_sum = self.buffer_b:resize(3 * H):sum(grad_a, 1)
         grad_b:add(scale, grad_a_sum)
 
         grad_x[{{}, t}]:mm(grad_a, Wx:t())
