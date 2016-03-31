@@ -43,8 +43,8 @@ function NMT:forward(input, target)
     --]]
     -- encode pass
     local output_encoder = self.encoder:updateOutput(input[1])
-    local last_encoder_state = self.encoder:last_state()
-    self.decoder:init_state(last_encoder_state)
+    -- initialize the decoder with the last state of the encoder
+    self.decoder:initState(self.encoder:lastState())
     local output_decoder = self.decoder:updateOutput(input[2])
     -- forward to fully connected layer
     local log_prob = self.layer:forward(output_decoder)
@@ -68,8 +68,8 @@ function NMT:backward(input, target)
 
     -- backward pass
     self.decoder:backward(input[2], grad_decoder)
-    local grad_state = self.decoder:get_grad_state()
-    self.encoder:set_grad_state(grad_state)
+    local grad_state = self.decoder:getGradState()
+    self.encoder:setGradState(grad_state)
 
     grad_encoder:resizeAs(output_encoder):zero()
     self.encoder:backward(input[1], grad_encoder)
@@ -173,14 +173,14 @@ function NMT:translate(x, beam_size, max_length)
     x = x:expand(K, x:size(2)):typeAs(self.params)
 
     local output_encoder = self.encoder:updateOutput(x)
-    local last_encoder_state = self.encoder:last_state()
+    local last_encoder_state = self.encoder:lastState()
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hyps = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local prev_state = last_encoder_state
     local complete_hyps = {}
     for i = 1, T-1 do
-        self.decoder:init_state(prev_state)
+        self.decoder:initState(prev_state)
         local cur_y = hyps[i]:view(-1, 1)
         local output_encoder = self.decoder:forward(cur_y)
         local log_prob = self.layer:forward(output_encoder)
@@ -215,7 +215,7 @@ function NMT:translate(x, beam_size, max_length)
         next_hyps[i+1]:copy(torch.Tensor(next_indices))
         hyps = next_hyps
         -- carry over the state of selected k
-        local cur_state = self.decoder:last_state()
+        local cur_state = self.decoder:lastState()
         local next_state = {}
         for _, state in ipairs(cur_state) do
             local my_state = {}

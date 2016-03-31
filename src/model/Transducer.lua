@@ -78,10 +78,10 @@ function Transducer:parameters()
 end
 
 
-function Transducer:last_state()
+function Transducer:lastState()
     local state = {}
     for _,rnn in ipairs(self.rnns) do
-        table.insert(state, rnn:last_state())
+        table.insert(state, rnn:lastState())
     end
     return state
 end
@@ -99,26 +99,26 @@ function Transducer:evaluate()
 end
 
 
-function Transducer:init_state(state)
+function Transducer:initState(state)
     assert(#state == #self.rnns)
     for i, state in ipairs(state) do
-        self.rnns[i]:init_state(state)
+        self.rnns[i]:initState(state)
     end
 end
 
 
-function Transducer:get_grad_state()
+function Transducer:getGradState()
     local grad_state = {}
     for _, rnn in ipairs(self.rnns) do
-        table.insert(grad_state, rnn:get_grad_state())
+        table.insert(grad_state, rnn:getGradState())
     end
     return grad_state
 end
 
 
-function Transducer:set_grad_state(grad_state)
+function Transducer:setGradState(grad_state)
     for i, grad in ipairs(grad_state) do
-        self.rnns[i]:set_grad_state(grad)
+        self.rnns[i]:setGradState(grad)
     end
 end
 

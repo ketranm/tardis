@@ -41,27 +41,27 @@ function layer:reset(std)
     return self
 end
 
-function layer:reset_state()
+function layer:resetState()
     self.h0 = self.h0.new()
 end
 
-function layer:set_grad_state(grad_state)
+function layer:setGradState(grad_state)
     local grad_h0 = grad_state[1]
     self.grad_h0:resizeAs(grad_h0):copy(grad_h0)
     self._init_grad_state = true
 end
 
-function layer:get_grad_state()
+function layer:getGradState()
     return {self.grad_h0}
 end
 
-function layer:init_state(state)
+function layer:initState(state)
     local h0 = state[1]
     self.h0:resizeAs(h0):copy(h0)
     self._copied_state = true
 end
 
-function layer:last_state()
+function layer:lastState()
     local T = self.output:size(2)
     local last_h = self.output[{{}, T}]
     return {last_h}

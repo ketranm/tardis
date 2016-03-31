@@ -43,7 +43,7 @@ function layer:reset(std)
     return self
 end
 
-function layer:reset_state()
+function layer:resetState()
     self.h0 = self.h0.new()
     self.c0 = self.c0.new()
 end
@@ -61,7 +61,7 @@ function layer:_get_sizes(input)
     return input:size(1), input:size(2)
 end
 
-function layer:set_grad_state(grad_state)
+function layer:setGradState(grad_state)
     --[[This function is helpful for seq2seq model
     It set the initial gradient that comes to state of the encoder
     ]]
@@ -73,14 +73,14 @@ function layer:set_grad_state(grad_state)
 end
 
 
-function layer:get_grad_state()
+function layer:getGradState()
     --[[This is useful for seq2seq model
     We use it to get gradient that comes out of state of the decoder
     --]]
     return {self.grad_c0, self.grad_h0}
 end
 
-function layer:init_state(state)
+function layer:initState(state)
     --[[This is useful for Seq2seq where we initialize the decoder from encoder's state
     When the RNN starts from a given state, we might want to get the gradient comes of of it
     so we set the copied flag to indicate so
@@ -91,7 +91,7 @@ function layer:init_state(state)
     self._copied_state = true
 end
 
-function layer:last_state()
+function layer:lastState()
     -- useful in Seq2seq model
     local N, T = self.cell:size(1), self.cell:size(2)
     local last_c = self.cell[{{}, T}]
