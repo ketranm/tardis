@@ -244,27 +244,26 @@ function layer:backward(input, gradOutput, scale)
     return self.gradInput
 end
 
-
---- this follows torch convention ---
-function layer:clearState()
-    self.cell:set()
-    self.gates:set()
-    self.buffer_h:set()
-    self.buffer_c:set()
-    self.buffer_b:set()
-    self.grad_a_buffer:set()
-
-    self.grad_c0:set()
-    self.grad_h0:set()
-    self.gradInput:set()
-    self.output:set()
-end
-
-
 function layer:updateGradInput(input, gradOutput)
     self:backward(input, gradOutput, 0)
 end
 
 function layer:accGradParameters(input, gradOutput, scale)
     self:backward(input, gradOutput, scale)
+end
+
+function layer:clearState()
+    nn.utils.clear(self, {
+        'output',
+        'cell',
+        'gates',
+        'buffer_h',
+        'buffer_c',
+        'buffer_b',
+        'grad_a_buffer',
+        'grad_c0',
+        'grad_h0',
+        'gradInput'
+    })
+    return parent.clearState(self)
 end
