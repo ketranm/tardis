@@ -88,9 +88,9 @@ function NMT:backward(input, target)
 end
 
 
-function NMT:update(learning_rate)
+function NMT:update(learningRate)
     local gradNorm = self.gradParams:norm()
-    local scale = learning_rate
+    local scale = learningRate
     if gradNorm > self.maxNorm then
         scale = scale*self.maxNorm /gradNorm
     end
@@ -160,18 +160,18 @@ function NMT:use_vocab(vocab)
 end
 
 
-function NMT:load_model(filename)
+function NMT:load(filename)
     local params = torch.load(filename)
     self.params:copy(params)
 end
 
 
-function NMT:save_model(filename)
+function NMT:save(filename)
     torch.save(filename, self.params)
 end
 
 
-function NMT:translate(x, beamSize, max_length)
+function NMT:translate(x, beamSize, maxLength)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence, (1, T) Tensor
@@ -182,7 +182,7 @@ function NMT:translate(x, beamSize, max_length)
     local idx_EOS = trgVocab['</s>']
 
     local K = beamSize or 10
-    local T = max_length or 50
+    local T = maxLength or 50
 
     x = self:_encodeString(x)
     x = x:expand(K, x:size(2)):typeAs(self.params)

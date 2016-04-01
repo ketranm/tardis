@@ -30,7 +30,7 @@ function tests.testForward()
     local x = torch.range(1, N * T):reshape(N, T)
 
 
-    local trans = nn.Transducer(kwargs)
+    local transducer = nn.Transducer(kwargs)
 
     -- test number of parameter
     local D, H = kwargs.embedding_size, kwargs.hidden_size
@@ -44,20 +44,20 @@ function tests.testForward()
         error('only support LSTM or GRU!')
     end
 
-    local params, grad_params = trans:getParameters()
+    local params, grad_params = transducer:getParameters()
     tester:assert(params:nElement() == num_params)
     tester:assert(grad_params:nElement() == num_params)
 
     local lt = nn.LookupTable(kwargs.vocab_size, kwargs.embedding_size)
-    lt.weight:copy(trans.transducer:get(1).weight)
+    lt.weight:copy(transducer.transducer:get(1).weight)
     local rnns = {}
 
-    local init_state = {}
+    local initState = {}
 
     for i = 1, kwargs.num_layers do
         local c0 = torch.randn(N, kwargs.hidden_size)
         local h0 = torch.randn(N, kwargs.hidden_size)
-        init_state[i] = {c0, h0}
+        initState[i] = {c0, h0}
     end
 
     for i = 1, kwargs.num_layers do
@@ -71,13 +71,13 @@ function tests.testForward()
         else
             error("only support LSTM or GRU!")
         end
-        rnn.weight:copy(trans.rnns[i].weight)  -- reset weight
-        rnn.bias:copy(trans.rnns[i].bias)
-        rnn:init_state(init_state[i])
+        rnn.weight:copy(transducer.rnns[i].weight)  -- reset weight
+        rnn.bias:copy(transducer.rnns[i].bias)
+        rnn:initState(initState[i])
         table.insert(rnns, rnn)
     end
     -- set state of transducer
-    trans:init_state(init_state)
+    transducer:initState(initState)
 
     local wemb = lt:forward(x)  -- word embeddings
     local h = wemb
@@ -86,7 +86,7 @@ function tests.testForward()
         h = h_next
     end
 
-    local h_trans = trans:forward(x)
+    local h_trans = transducer:forward(x)
     tester:assertTensorEq(h, h_trans, 1e-10)
 end
 

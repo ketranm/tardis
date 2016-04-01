@@ -12,24 +12,24 @@ function NMT:__init(kwargs)
     local kwargs = kwargs;
 
     -- over write option
-    kwargs.vocab_size = kwargs.source_vocab_size
+    kwargs.vocabSize = kwargs.srcVocabSize
     self.encoder = nn.Transducer(kwargs)
 
     -- over write option
-    kwargs.vocab_size = kwargs.target_vocab_size
+    kwargs.vocabSize = kwargs.trgVocabSize
     self.decoder = nn.Transducer(kwargs)
 
     self.layer = nn.Sequential()
-    self.layer:add(nn.View(-1, kwargs.hidden_size))
-    self.layer:add(nn.Linear(kwargs.hidden_size, kwargs.target_vocab_size))
+    self.layer:add(nn.View(-1, kwargs.hiddenSize))
+    self.layer:add(nn.Linear(kwargs.hiddenSize, kwargs.trgVocabSize))
     self.layer:add(nn.LogSoftMax())
 
     self.criterion = nn.ClassNLLCriterion()
-    self.grad_encoder = torch.Tensor()  -- always zeros
+    self.gradEncoder = torch.Tensor()  -- always zeros
 
     -- get parameters and gradients for optimization
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.layer)
-    self.max_norm = kwargs.max_norm or 5
+    self.maxNorm = kwargs.maxNorm or 5
     self.records = {}
 end
 
@@ -42,16 +42,16 @@ function NMT:forward(input, target)
         target: a tensor of (batch_size, len_ys)
     --]]
     -- encode pass
-    local output_encoder = self.encoder:updateOutput(input[1])
+    local outputEncoder = self.encoder:updateOutput(input[1])
     -- initialize the decoder with the last state of the encoder
     self.decoder:initState(self.encoder:lastState())
-    local output_decoder = self.decoder:updateOutput(input[2])
+    local outputDecoder = self.decoder:updateOutput(input[2])
     -- forward to fully connected layer
-    local log_prob = self.layer:forward(output_decoder)
+    local logProb = self.layer:forward(outputDecoder)
     -- record all the temporal tensors for back-propagation
     -- this is cheap because we use reference
-    self.records = {output_encoder, output_decoder, log_prob}
-    return self.criterion:forward(log_prob, target)
+    self.records = {outputEncoder, outputDecoder, logProb}
+    return self.criterion:forward(logProb, target)
 end
 
 
@@ -60,27 +60,26 @@ function NMT:backward(input, target)
     self.gradParams:zero()
 
     -- unpack records
-    local output_encoder, output_decoder, log_prob = unpack(self.records)
-    local grad_encoder = self.grad_encoder
+    local outputEncoder, outputDecoder, logProb = unpack(self.records)
+    local gradEncoder = self.gradEncoder
 
-    local grad_loss = self.criterion:backward(log_prob, target)
-    local grad_decoder = self.layer:backward(output_decoder, grad_loss)
+    local gradLoss = self.criterion:backward(logProb, target)
+    local gradDecoder = self.layer:backward(outputDecoder, gradLoss)
 
     -- backward pass
-    self.decoder:backward(input[2], grad_decoder)
-    local grad_state = self.decoder:getGradState()
-    self.encoder:setGradState(grad_state)
+    self.decoder:backward(input[2], gradDecoder)
+    self.encoder:setGradState(self.decoder:getGradState())
 
-    grad_encoder:resizeAs(output_encoder):zero()
-    self.encoder:backward(input[1], grad_encoder)
+    gradEncoder:resizeAs(outputEncoder):zero()
+    self.encoder:backward(input[1], gradEncoder)
 end
 
 
-function NMT:update(learning_rate)
-    local grad_norm = self.gradParams:norm()
-    local scale = learning_rate
-    if grad_norm > self.max_norm then
-        scale = scale*self.max_norm /grad_norm
+function NMT:update(learningRate)
+    local gradNorm = self.gradParams:norm()
+    local scale = learningRate
+    if gradNorm > self.maxNorm then
+        scale = scale*self.maxNorm /gradNorm
     end
     self.params:add(self.gradParams:mul(-scale)) -- do it in-place
 end
@@ -109,9 +108,9 @@ function flat_to_rc(v, indices, flat_index)
 end
 
 
-function NMT:_decode_string(x)
+function NMT:_decodeString(x)
     local ws = {}
-    local vocab = self.target_vocab
+    local vocab = self.trgVocab
     for i = 1, x:nElement() do
         local idx = x[i]
         if idx ~= vocab['<s>'] and idx ~= vocab['</s>'] then
@@ -122,13 +121,13 @@ function NMT:_decode_string(x)
 end
 
 
-function NMT:_encode_string(x)
+function NMT:_encodeString(x)
     -- encode source sentence
     local xs = stringx.split(x)
     local xids = {}
     for i = #xs, 1, -1 do
         local w = xs[i]
-        local idx = self.source_vocab[w] or self.source_vocab['<unk>']
+        local idx = self.srcVocab[w] or self.srcVocab['<unk>']
         table.insert(xids, idx)
     end
     return torch.Tensor(xids):view(1, -1)
@@ -136,105 +135,105 @@ end
 
 
 function NMT:use_vocab(vocab)
-    self.source_vocab = vocab[1]
-    self.target_vocab = vocab[2]
+    self.srcVocab = vocab[1]
+    self.trgVocab = vocab[2]
     self.id2word = {}
-    for w, id in pairs(self.target_vocab) do
+    for w, id in pairs(self.trgVocab) do
         self.id2word[id] = w
     end
 end
 
 
-function NMT:load_model(filename)
+function NMT:load(filename)
     local params = torch.load(filename)
     self.params:copy(params)
 end
 
 
-function NMT:save_model(filename)
+function NMT:save(filename)
     torch.save(filename, self.params)
 end
 
 
-function NMT:translate(x, beam_size, max_length)
+function NMT:translate(x, beamSize, maxLength)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence, (1, T) Tensor
-        beam_size: size of the beam search
+        beamSize: size of the beam search
     --]]
-    local source_vocab, target_vocab = self.source_vocab, self.target_vocab
-    local idx_GO = target_vocab['<s>']
-    local idx_EOS = target_vocab['</s>']
+    local srcVocab, trgVocab = self.srcVocab, self.trgVocab
+    local idx_GO = trgVocab['<s>']
+    local idx_EOS = trgVocab['</s>']
 
-    local K = beam_size or 10
-    local T = max_length or 50
+    local K = beamSize or 10
+    local T = maxLength or 50
 
-    x = self:_encode_string(x)
+    x = self:_encodeString(x)
     x = x:expand(K, x:size(2)):typeAs(self.params)
 
-    local output_encoder = self.encoder:updateOutput(x)
-    local last_encoder_state = self.encoder:lastState()
+    local outputEncoder = self.encoder:updateOutput(x)
+    local prevState = self.encoder:lastState()
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
-    local hyps = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
-    local prev_state = last_encoder_state
-    local complete_hyps = {}
+    local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
+    local completeHyps = {}
     for i = 1, T-1 do
-        self.decoder:initState(prev_state)
-        local cur_y = hyps[i]:view(-1, 1)
-        local output_encoder = self.decoder:forward(cur_y)
-        local log_prob = self.layer:forward(output_encoder)
-        local max_scores, indices = log_prob:topk(K, true)
-        -- previous scores
-        local cur_scores = scores:repeatTensor(1, K)
-        -- add them to current ones
-        max_scores:add(cur_scores)
+        self.decoder:initState(prevState)
+        local curIdx = hypothesis[i]:view(-1, 1)
+        local outputDecoder = self.decoder:forward(curIdx)
+        local logProb = self.layer:forward(outputDecoder)
 
-        local flat = max_scores:view(max_scores:size(1) * max_scores:size(2))
-        local next_indices = {}
+        local maxScores, indices = logProb:topk(K, true)
+        -- previous scores
+        local curScores = scores:repeatTensor(1, K)
+        -- add them to current ones
+        maxScores:add(curScores)
+
+        local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
+        local nextIndex = {}
         local expand_k = {}
         local k = 1
         while k <= K do
             local score, index = flat:max(1)
-            local prev_k, yi = flat_to_rc(max_scores, indices, index[1])
+            local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
             if yi == idx_EOS then
                 -- complete hypothesis
-                local hypo = self:_decode_string(hyps[{{}, prev_k}])
-                complete_hyps[hypo] = scores[prev_k][1]/i
-            elseif yi ~= idx_GO then
-                table.insert(next_indices,  yi)
+                local hypo = self:_decodeString(hypothesis[{{}, prev_k}])
+                completeHyps[hypo] = scores[prev_k][1]/i -- normalize by sentence length
+            else
+                table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
                 scores[k] = score[1]
                 k = k + 1
             end
         end
         expand_k = torch.Tensor(expand_k):long()
-        local next_hyps = hyps:index(2, expand_k)  -- remember to convert to cuda
-        next_hyps[i+1]:copy(torch.Tensor(next_indices))
-        hyps = next_hyps
+        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
+        nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
+        hypothesis = nextHypothesis
         -- carry over the state of selected k
-        local cur_state = self.decoder:lastState()
-        local next_state = {}
-        for _, state in ipairs(cur_state) do
+        local currState = self.decoder:lastState()
+        local nextState = {}
+        for _, state in ipairs(currState) do
             local my_state = {}
             for _, s in ipairs(state) do
                 table.insert(my_state, s:index(1, expand_k))
             end
-            table.insert(next_state, my_state)
+            table.insert(nextState, my_state)
         end
-        prev_state = next_state
+        prevState = nextState
     end
     for k = 1, K do
-        local hypo = self:_decode_string(hyps[{{}, k}])
-        complete_hyps[hypo] = scores[k][1]/(T-1)
+        local hypo = self:_decodeString(hypothesis[{{}, k}])
+        completeHyps[hypo] = scores[k][1] / (T-1)
     end
     local n_best = {}
-    for hypo in pairs(complete_hyps) do n_best[#n_best + 1] = hypo end
+    for hypo in pairs(completeHyps) do n_best[#n_best + 1] = hypo end
     -- sort the result and pick the best one
     table.sort(n_best, function(s1, s2)
-        return complete_hyps[s1] > complete_hyps[s2] or complete_hyps[s1] > complete_hyps[s2] and s1 > s2
+        return completeHyps[s1] > completeHyps[s2] or completeHyps[s1] > completeHyps[s2] and s1 > s2
     end)
     return n_best[1]
 end
