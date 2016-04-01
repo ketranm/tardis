@@ -5,7 +5,7 @@ require 'nn'
 local Seq2seq
 require 'util.DataLoader'
 
-torch.manualSeed(42)
+--torch.manualSeed(42)
 local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
 
@@ -52,45 +52,45 @@ end
 
 function train()
     local exp = math.exp
-    for epoch = 1,kwargs.max_epoch do
+    for epoch = 1,kwargs.maxEpoch do
         loader:read("train")
         model:training()
         local nll = 0
-        local num_batches = loader:num_batches()
-        print('number of batches: ', num_batches)
-        for i = 1, num_batches do
-            local s, t, next_t = prepro(loader:next_batch())
+        local nBatch = loader:nBatch()
+        print('number of batches: ', nBatch)
+        for i = 1, nBatch do
+            local s, t, next_t = prepro(loader:nextBatch())
             nll = nll + model:forward({s,t}, next_t:view(-1))
             model:backward({s,t},next_t:view(-1))
-            model:update(kwargs.learning_rate)
+            model:update(kwargs.learningRate)
             --model:clearState()
-            if i % kwargs.report_every == 0 then
-                xlua.progress(i, num_batches)
+            if i % kwargs.reportEvery == 0 then
+                xlua.progress(i, nBatch)
                 print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
                 collectgarbage()
             end
         end
 
-        if epoch > kwargs.learning_rate_decay_after then
-            kwargs.learning_rate = kwargs.learning_rate * kwargs.decay_rate
+        if epoch > kwargs.dacayAfter then
+            kwargs.learningRate = kwargs.learningRate * kwargs.decayRate
         end
 
         loader:read("valid")
         model:evaluate()
         local valid_nll = 0
-        local num_batches = loader:num_batches()
-        for i = 1, num_batches do
-            local s,t,next_t = prepro(loader:next_batch())
+        local nBatch = loader:nBatch()
+        for i = 1, nBatch do
+            local s,t,next_t = prepro(loader:nextBatch())
             valid_nll = valid_nll + model:forward({s,t}, next_t:view(-1))
             if i % 50 == 0 then collectgarbage() end
         end
 
         prev_valid_nll = valid_nll
-        print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/num_batches)))
-        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/num_batches)
+        print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/nBatch)))
+        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/nBatch)
         paths.mkdir(paths.dirname(checkpoint))
         print('save model to: ' .. checkpoint)
-        print('learning_rate: ', kwargs.learning_rate)
+        print('learningRate: ', kwargs.learningRate)
         model:save_model(checkpoint)
 
     end
@@ -109,7 +109,7 @@ else
     local file = io.open('translation.txt', 'w')
     io.output(file)
     for line in io.lines(kwargs.text_file) do
-        local translation = model:translate(line, kwargs.beam_size)
+        local translation = model:translate(line, kwargs.beamSize)
         --print(translation)
         io.write(translation .. '\n')
         io.flush()

@@ -80,9 +80,8 @@ function NMT:backward(input, target)
     gradDecoder:add(gradGimpse[2]) -- accummulate gradient in-place 
 
     self.decoder:backward(input[2], gradDecoder)
-    local grad_state = self.decoder:getGradState()
     -- init gradient from decoder
-    self.encoder:setGradState(grad_state)
+    self.encoder:setGradState(self.decoder:getGradState())
     -- backward to encoder
     self.gradEncoder:resizeAs(outputEncoder):zero()
     self.encoder:backward(input[1], self.gradEncoder)
@@ -192,20 +191,20 @@ function NMT:translate(x, beamSize, max_length)
     local prevState = self.encoder:lastState()
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
-    local hyps = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
+    local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local completeHyps = {}
     for i = 1, T-1 do
         self.decoder:initState(prevState)
-        local cur_y = hyps[i]:view(-1, 1)
-        local outputDecoder = self.decoder:forward(cur_y)
+        local curIdx = hypothesis[i]:view(-1, 1)
+        local outputDecoder = self.decoder:forward(curIdx)
         local context = self.glimpse:forward({outputEncoder, outputDecoder})        
         local logProb = self.layer:forward({context, outputDecoder})
 
         local maxScores, indices = logProb:topk(K, true)
         -- previous scores
-        local currScores = scores:repeatTensor(1, K)
+        local curScores = scores:repeatTensor(1, K)
         -- add them to current ones
-        maxScores:add(currScores)
+        maxScores:add(curScores)
 
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
         local nextIndex = {}
@@ -218,7 +217,7 @@ function NMT:translate(x, beamSize, max_length)
             flat[index[1]] = -math.huge
             if yi == idx_EOS then
                 -- complete hypothesis
-                local hypo = self:_decodeString(hyps[{{}, prev_k}])
+                local hypo = self:_decodeString(hypothesis[{{}, prev_k}])
                 completeHyps[hypo] = scores[prev_k][1]/i -- normalize by sentence length
             else
                 table.insert(nextIndex,  yi)
@@ -228,9 +227,9 @@ function NMT:translate(x, beamSize, max_length)
             end
         end
         expand_k = torch.Tensor(expand_k):long()
-        local next_hyps = hyps:index(2, expand_k)  -- remember to convert to cuda
-        next_hyps[i+1]:copy(torch.Tensor(nextIndex))
-        hyps = next_hyps
+        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
+        nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
+        hypothesis = nextHypothesis
         -- carry over the state of selected k
         local currState = self.decoder:lastState()
         local nextState = {}
@@ -244,7 +243,7 @@ function NMT:translate(x, beamSize, max_length)
         prevState = nextState
     end
     for k = 1, K do
-        local hypo = self:_decodeString(hyps[{{}, k}])
+        local hypo = self:_decodeString(hypothesis[{{}, k}])
         completeHyps[hypo] = scores[k][1] / (T-1)
     end
     local n_best = {}

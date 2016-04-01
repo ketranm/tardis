@@ -10,30 +10,30 @@ local Transducer, parent = torch.class('nn.Transducer', 'nn.Module')
 
 
 function Transducer:__init(kwargs)
-    self.vocab_size = kwargs.vocab_size
-    self.embedding_size = kwargs.embedding_size
-    self.hidden_size = kwargs.hidden_size
-    self.num_layers = kwargs.num_layers
+    self.vocabSize = kwargs.vocabSize
+    self.embeddingSize = kwargs.embeddingSize
+    self.hiddenSize = kwargs.hiddenSize
+    self.numLayer = kwargs.numLayer
     self.dropout = kwargs.dropout or 0
     self.batch_norm = kwargs.batch_norm
     self.rnn = kwargs.rnn or 'lstm'
     -- build transducer
     self.transducer = nn.Sequential()
-    self.transducer:add(nn.LookupTable(self.vocab_size, self.embedding_size))
+    self.transducer:add(nn.LookupTable(self.vocabSize, self.embeddingSize))
     self.rnns = {}
     -- for batch normalization
     self.bn_view_in = {}
     self.bn_view_out = {}
     self.output = torch.Tensor()
 
-    for i = 1, self.num_layers do
-        local prev_dim = self.hidden_size
-        if i == 1 then prev_dim = self.embedding_size end
+    for i = 1, self.numLayer do
+        local prevSize = self.hiddenSize
+        if i == 1 then prevSize = self.embeddingSize end
         local rnn
         if self.rnn == 'lstm' then
-            rnn = nn.LSTM(prev_dim, self.hidden_size)
+            rnn = nn.LSTM(prevSize, self.hiddenSize)
         elseif self.rnn == 'gru' then
-            rnn = nn.GRU(prev_dim, self.hidden_size)
+            rnn = nn.GRU(prevSize, self.hiddenSize)
         else
             error("only support LSTM or GRU!")
         end
@@ -56,13 +56,13 @@ end
 
 
 function Transducer:updateOutput(input)
-    local batch_size, length = input:size(1), input:size(2)
+    local batchSize, length = input:size(1), input:size(2)
 
     for _,view_in in ipairs(self.bn_view_in) do
-        view_in:resetSize(batch_size * length, -1)
+        view_in:resetSize(batchSize * length, -1)
     end
     for _,view_out in ipairs(self.bn_view_out) do
-        view_out:resetSize(batch_size, length, -1)
+        view_out:resetSize(batchSize, length, -1)
     end
     return self.transducer:forward(input)
 end
@@ -108,16 +108,16 @@ end
 
 
 function Transducer:getGradState()
-    local grad_state = {}
+    local gradState = {}
     for _, rnn in ipairs(self.rnns) do
-        table.insert(grad_state, rnn:getGradState())
+        table.insert(gradState, rnn:getGradState())
     end
-    return grad_state
+    return gradState
 end
 
 
-function Transducer:setGradState(grad_state)
-    for i, grad in ipairs(grad_state) do
+function Transducer:setGradState(gradState)
+    for i, grad in ipairs(gradState) do
         self.rnns[i]:setGradState(grad)
     end
 end
