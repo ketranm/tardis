@@ -5,7 +5,7 @@ require 'nn'
 local Seq2seq
 require 'util.DataLoader'
 
---torch.manualSeed(42)
+torch.manualSeed(42)
 local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
 
@@ -87,16 +87,16 @@ function train()
 
         prev_valid_nll = valid_nll
         print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/nBatch)))
-        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.checkpoint_dir, epoch, valid_nll/nBatch)
+        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", kwargs.modelDir, epoch, valid_nll/nBatch)
         paths.mkdir(paths.dirname(checkpoint))
         print('save model to: ' .. checkpoint)
         print('learningRate: ', kwargs.learningRate)
-        model:save_model(checkpoint)
+        model:save(checkpoint)
 
     end
 end
 
-local eval = kwargs.model_file and kwargs.text_file
+local eval = kwargs.modelFile and kwargs.textFile
 
 if not eval then
     -- training mode
@@ -105,10 +105,10 @@ else
     -- use dictionary
     model:use_vocab(loader.vocab)
     model:evaluate()
-    model:load_model(kwargs.model_file)
+    model:load(kwargs.modelFile)
     local file = io.open('translation.txt', 'w')
     io.output(file)
-    for line in io.lines(kwargs.text_file) do
+    for line in io.lines(kwargs.textFile) do
         local translation = model:translate(line, kwargs.beamSize)
         --print(translation)
         io.write(translation .. '\n')
