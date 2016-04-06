@@ -20,7 +20,7 @@ function Transducer:__init(kwargs)
     -- build transducer
     self.transducer = nn.Sequential()
     self.transducer:add(nn.LookupTable(self.vocabSize, self.embeddingSize))
-    self.rnns = {}
+    self._rnns = {}
     -- for batch normalization
     self.bn_view_in = {}
     self.bn_view_out = {}
@@ -38,7 +38,7 @@ function Transducer:__init(kwargs)
             error("only support LSTM or GRU!")
         end
         self.transducer:add(rnn)
-        table.insert(self.rnns, rnn)
+        table.insert(self._rnns, rnn)
         if self.batch_norm then
             local view_in = nn.View(1, 1, -1):setNumInputDims(3)
             table.insert(self.bn_view_in, view_in)
@@ -80,7 +80,7 @@ end
 
 function Transducer:lastState()
     local state = {}
-    for _,rnn in ipairs(self.rnns) do
+    for _,rnn in ipairs(self._rnns) do
         table.insert(state, rnn:lastState())
     end
     return state
@@ -100,16 +100,15 @@ end
 
 
 function Transducer:initState(state)
-    assert(#state == #self.rnns)
-    for i, state in ipairs(state) do
-        self.rnns[i]:initState(state)
+    for i, s in ipairs(state) do
+        self._rnns[i]:initState(s)
     end
 end
 
 
 function Transducer:getGradState()
     local gradState = {}
-    for _, rnn in ipairs(self.rnns) do
+    for _, rnn in ipairs(self._rnns) do
         table.insert(gradState, rnn:getGradState())
     end
     return gradState
@@ -118,7 +117,7 @@ end
 
 function Transducer:setGradState(gradState)
     for i, grad in ipairs(gradState) do
-        self.rnns[i]:setGradState(grad)
+        self._rnns[i]:setGradState(grad)
     end
 end
 
@@ -132,7 +131,7 @@ function Transducer:accGradParameters(input, gradOutput, scale)
 end
 
 function Transducer:clearState()
-    for _, rnn in ipairs(self.rnns) do
+    for _, rnn in ipairs(self._rnns) do
         rnn:clearState()
     end
 end

@@ -30,7 +30,6 @@ function GlimpseDot:updateOutput(input)
     self.att = self.att:view(N, Ty, Tx)
     self.output:resizeAs(y):bmm(self.att, x)
     return self.output
-
 end
 
 function GlimpseDot:backward(input, gradOutput, scale)

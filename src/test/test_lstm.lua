@@ -100,7 +100,7 @@ function tests.gradcheck()
     end
 
     local function fw(w)
-        local old_w = lstm.weight
+        local old_w = lstm.weight:clone()
         lstm.weight = w
         local out = lstm:forward(x)
         lstm.weight = old_w
@@ -108,7 +108,7 @@ function tests.gradcheck()
     end
 
     local function fb(b)
-        local old_b = lstm.bias
+        local old_b = lstm.bias:clone()
         lstm.bias = b
         local out = lstm:forward(x)
         lstm.bias = old_b

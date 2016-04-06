@@ -11,7 +11,9 @@ local tester = torch.Tester()
 function tests.testForward()
     local N, Tx, Ty, D = 2, 3, 4, 5
     local glimpse = nn.Glimpse(D)
-
+    local params, grad_params = glimpse:getParameters()
+    tester:assert(params:nElement() == grad_params:nElement())
+    tester:assert(params:nElement() == D*D)
     -- manual check with torch.nn
     local MM1 = nn.MM(false, true)
     local MM2 = nn.MM(false, false)
@@ -20,6 +22,7 @@ function tests.testForward()
     local linear = nn.Linear(D, D, false)
     linear.weight:copy(glimpse.weight:t())
     tester:assertTensorEq(linear.weight:t(), glimpse.weight, 1e-10)
+
 
     local gout
     for i = 1, 3 do
