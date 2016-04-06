@@ -6,7 +6,7 @@ url: http://www.aclweb.org/anthology/D15-1166
 --]]
 
 require 'model.Transducer'
-require 'model.Glimpse'
+require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
@@ -21,7 +21,7 @@ function NMT:__init(kwargs)
     kwargs.vocabSize = kwargs.trgVocabSize
     self.decoder = nn.Transducer(kwargs)
 
-    self.glimpse = nn.Glimpse(kwargs.hiddenSize)
+    self.glimpse = nn.GlimpseDot(kwargs.hiddenSize)
     --
     self.layer = nn.Sequential()
     -- joining inputs, can be coded more efficient
@@ -38,8 +38,6 @@ function NMT:__init(kwargs)
     self.layer:add(nn.LogSoftMax())
 
     self.criterion = nn.ClassNLLCriterion()
-    self.gradEncoder = torch.Tensor()  -- buffer
-
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
     self.maxNorm = kwargs.maxNorm or 5
     self.buffers = {}
@@ -55,6 +53,7 @@ function NMT:forward(input, target)
     --]]
     -- encode pass
     local outputEncoder = self.encoder:updateOutput(input[1])
+    -- we then initialize the decoder with the last state of the encoder
     self.decoder:initState(self.encoder:lastState())
     local outputDecoder = self.decoder:updateOutput(input[2])
     -- compute the context vector
@@ -74,17 +73,17 @@ function NMT:backward(input, target)
 
     local gradLoss = self.criterion:backward(logProb, target)
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
-    local gradDecoder = gradLayer[2]
-    local gradGimpse = self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
+    local gradDecoder = gradLayer[2] -- grad to decoder
+    local gradGlimpse = self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
 
-    gradDecoder:add(gradGimpse[2]) -- accummulate gradient in-place 
+    gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place 
 
     self.decoder:backward(input[2], gradDecoder)
     -- init gradient from decoder
     self.encoder:setGradState(self.decoder:getGradState())
     -- backward to encoder
-    self.gradEncoder:resizeAs(outputEncoder):zero()
-    self.encoder:backward(input[1], self.gradEncoder)
+    local gradEncoder = gradGlimpse[1]
+    self.encoder:backward(input[1], gradEncoder)
 end
 
 
