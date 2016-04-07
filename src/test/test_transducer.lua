@@ -21,7 +21,7 @@ local kwargs = {vocabSize = 100000,
                 dropout = 0,
                 rnn = 'lstm'}
 
-function tests.testForward()
+function tests.testForwardBackward()
     -- generate example
 
     local N = torch.random(20, 200)
@@ -70,8 +70,8 @@ function tests.testForward()
         else
             error("only support LSTM or GRU!")
         end
-        rnn.weight:copy(transducer.rnns[i].weight)  -- reset weight
-        rnn.bias:copy(transducer.rnns[i].bias)
+        rnn.weight:copy(transducer._rnns[i].weight)  -- reset weight
+        rnn.bias:copy(transducer._rnns[i].bias)
         rnn:initState(initState[i])
         table.insert(rnns, rnn)
     end
@@ -106,13 +106,13 @@ function tests.testForward()
     tester:assertTensorEq(transducer.transducer:get(1).gradWeight, lt.gradWeight, 1e-10)
 
     for i = 1, kwargs.numLayer do
-        tester:assertTensorEq(transducer.rnns[i].gradWeight, rnns[i].gradWeight, 1e-10)
-        tester:assertTensorEq(transducer.rnns[i].gradBias, rnns[i].gradBias, 1e-10)
+        tester:assertTensorEq(transducer._rnns[i].gradWeight, rnns[i].gradWeight, 1e-10)
+        tester:assertTensorEq(transducer._rnns[i].gradBias, rnns[i].gradBias, 1e-10)
     end
 end
 
-
-function tests.gradcheck()
+--[[
+function tests.gradcheck2()
     -- generate example
 
     local N = 2
@@ -127,14 +127,6 @@ function tests.gradcheck()
     transducer:add(nn.LSTM(kwargs.hiddenSize, kwargs.hiddenSize))
     
 
-    local initState = {}
-    --[[
-    for i = 1, kwargs.numLayer do
-        local c0 = torch.randn(N, kwargs.hiddenSize)
-        local h0 = torch.randn(N, kwargs.hiddenSize)
-        initState[i] = {c0, h0}
-    end
-    ]]
     local c0 = torch.randn(N, kwargs.hiddenSize)
     local h0 = torch.randn(N, kwargs.hiddenSize)
     for i = 1, 3 do
@@ -156,8 +148,9 @@ function tests.gradcheck()
     tester:assertle(dh0_error, 1e-2)
 
 end
+--]]
 
-function tests.gradcheck2()
+function tests.gradcheck()
     -- generate example
 
     local N = 2
@@ -166,9 +159,9 @@ function tests.gradcheck2()
 
 
     local transducer = nn.Transducer(kwargs)
-    
+
     local state0 = {}
-    
+
     for i = 1, kwargs.numLayer do
         local c0, h0
         c0 = torch.randn(N, kwargs.hiddenSize)
@@ -205,8 +198,8 @@ function tests.gradcheck2()
     local dh0_error = gradcheck.relative_error(dh0_num, dh0)
     local dc0_error = gradcheck.relative_error(dc0_num, dc0)
 
-    tester:assertle(dh0_error, 1e-2, "gradcheck2")
-    tester:assertle(dc0_error, 1e-2, "gradcheck2")
+    tester:assertle(dh0_error, 1e-2, "gradcheck")
+    tester:assertle(dc0_error, 1e-2, "gradcheck")
 end
 
 tester:add(tests)

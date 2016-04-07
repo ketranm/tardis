@@ -15,7 +15,7 @@ function Transducer:__init(kwargs)
     self.hiddenSize = kwargs.hiddenSize
     self.numLayer = kwargs.numLayer
     self.dropout = kwargs.dropout or 0
-    self.batch_norm = kwargs.batch_norm
+    self.batchNorm = kwargs.batchNorm
     self.rnn = kwargs.rnn or 'lstm'
     -- build transducer
     self.transducer = nn.Sequential()
@@ -39,7 +39,7 @@ function Transducer:__init(kwargs)
         end
         self.transducer:add(rnn)
         table.insert(self._rnns, rnn)
-        if self.batch_norm then
+        if self.batchNorm then
             local view_in = nn.View(1, 1, -1):setNumInputDims(3)
             table.insert(self.bn_view_in, view_in)
             self.transducer:add(view_in)
