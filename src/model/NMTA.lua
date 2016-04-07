@@ -47,9 +47,9 @@ end
 function NMT:forward(input, target)
     --[[Forward pass
     Args:
-        input: a table of {x, y} where x = (batchSize, len_xs) Tensor and
-        y = (batchSize, len_ys) Tensor
-        target: a tensor of (batchSize, len_ys)
+        input: a table of {x, y} where x = (batchSize, srcLength) Tensor and
+        y = (batchSize, trgLength) Tensor
+        target: a tensor of (batchSize, trgLength)
     --]]
     -- encode pass
     local outputEncoder = self.encoder:updateOutput(input[1])
