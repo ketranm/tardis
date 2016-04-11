@@ -173,7 +173,7 @@ end
 function NMT:translate(x, beamSize, maxLength)
     --[[Translate input sentence with beam search
     Args:
-        x: source sentence, (1, T) Tensor
+        x: source sentence
         beamSize: size of the beam search
     --]]
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
@@ -210,18 +210,18 @@ function NMT:translate(x, beamSize, maxLength)
         local expand_k = {}
         local k = 1
         while k <= K do
-            local score, index = flat:max(1)
+            local logp, index = flat:max(1)
             local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
             if yi == idx_EOS then
                 -- complete hypothesis
-                local hypo = self:_decodeString(hypothesis[{{}, prev_k}])
-                completeHyps[hypo] = scores[prev_k][1]/i -- normalize by sentence length
+                local cand = self:_decodeString(hypothesis[{{}, prev_k}])
+                completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                scores[k] = score[1]
+                scores[k] = logp[1]
                 k = k + 1
             end
         end
@@ -233,25 +233,25 @@ function NMT:translate(x, beamSize, maxLength)
         local currState = self.decoder:lastState()
         local nextState = {}
         for _, state in ipairs(currState) do
-            local my_state = {}
+            local sk = {}
             for _, s in ipairs(state) do
-                table.insert(my_state, s:index(1, expand_k))
+                table.insert(sk, s:index(1, expand_k))
             end
-            table.insert(nextState, my_state)
+            table.insert(nextState, sk)
         end
         prevState = nextState
     end
     for k = 1, K do
-        local hypo = self:_decodeString(hypothesis[{{}, k}])
-        completeHyps[hypo] = scores[k][1] / (T-1)
+        local cand = self:_decodeString(hypothesis[{{}, k}])
+        completeHyps[cand] = scores[k][1] / (T-1)
     end
-    local n_best = {}
-    for hypo in pairs(completeHyps) do n_best[#n_best + 1] = hypo end
+    local nBest = {}
+    for cand in pairs(completeHyps) do nBest[#nBest + 1] = cand end
     -- sort the result and pick the best one
-    table.sort(n_best, function(s1, s2)
-        return completeHyps[s1] > completeHyps[s2] or completeHyps[s1] > completeHyps[s2] and s1 > s2
+    table.sort(nBest, function(c1, c2)
+        return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
-    return n_best[1]
+    return nBest[1]
 end
 
 

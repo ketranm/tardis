@@ -61,7 +61,7 @@ function BLEU.score(target, reference)
     end
 
     local log_bleu_ngram = _.map(bleu_ngram, function(i, v) return math.log(v) end)
-    local bleu = brevity_penalty * math.exp(_.reduce(log_bleu_ngram, function(s, v) return s+v end) / 4)
+    local bleu = brevity_penalty * math.exp(_.reduce(log_bleu_ngram, function(s, v) return s+v end) / nr)
     return bleu
 end
 

@@ -1,8 +1,6 @@
 require 'torch'
 require 'nn'
 
-
-local Seq2seq
 require 'util.DataLoader'
 
 torch.manualSeed(42)
@@ -37,17 +35,17 @@ local loader = DataLoader(kwargs)
 -- prepare data
 function prepro(batch)
     local source, target = unpack(batch)
-    local len_ys = target:size(2)
+    local trgLength = target:size(2)
     -- make contiguous
     source = source:contiguous()
-    prev_target = target:narrow(2,1,len_ys-1):contiguous()
-    next_target = target:narrow(2,2,len_ys-1):contiguous()
+    prevTrg = target:narrow(2,1,trgLength-1):contiguous()
+    nextTrg = target:narrow(2,2,trgLength-1):contiguous()
     if kwargs.gpuid >= 0 then
         source = source:float():cuda()
-        prev_target = prev_target:float():cuda()
-        next_target = next_target:float():cuda()
+        prevTrg = prevTrg:float():cuda()
+        nextTrg = nextTrg:float():cuda()
     end
-    return source, prev_target, next_target
+    return source, prevTrg, nextTrg
 end
 
 function train()
@@ -59,9 +57,9 @@ function train()
         local nBatch = loader:nBatch()
         print('number of batches: ', nBatch)
         for i = 1, nBatch do
-            local s, t, next_t = prepro(loader:nextBatch())
-            nll = nll + model:forward({s,t}, next_t:view(-1))
-            model:backward({s,t},next_t:view(-1))
+            local src, trg, nextTrg = prepro(loader:nextBatch())
+            nll = nll + model:forward({src, trg}, nextTrg:view(-1))
+            model:backward({src, trg}, nextTrg:view(-1))
             model:update(kwargs.learningRate)
             --model:clearState()
             if i % kwargs.reportEvery == 0 then
@@ -80,8 +78,8 @@ function train()
         local valid_nll = 0
         local nBatch = loader:nBatch()
         for i = 1, nBatch do
-            local s,t,next_t = prepro(loader:nextBatch())
-            valid_nll = valid_nll + model:forward({s,t}, next_t:view(-1))
+            local src, trg, nextTrg = prepro(loader:nextBatch())
+            valid_nll = valid_nll + model:forward({src, trg}, nextTrg:view(-1))
             if i % 50 == 0 then collectgarbage() end
         end
 
