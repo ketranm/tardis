@@ -2,7 +2,7 @@ require 'torch'
 require 'nn'
 
 -- make sure this script can be run from any folder
-package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])
+package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])[^\/]-$]] .."?.lua;".. package.path
 
 require 'util.DataLoader'
 
@@ -138,4 +138,3 @@ else
     print('tot time: ' .. transTime .. ' sec')
     print('time per sentence: ' .. transTime/nbLines .. ' sec')
 end
-
