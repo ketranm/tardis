@@ -177,7 +177,19 @@ function NMT:translate(x, beamSize, maxLength)
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local completeHyps = {}
-    for i = 1, T-1 do
+
+    -- avoid using goto
+    -- handle the first prediction
+    self.decoder:initState(prevState)
+    local curIdx = hypothesis[1]:view(-1, 1)
+    local outputDecoder = self.decoder:forward(curIdx)
+    local logProb = self.layer:forward(outputDecoder)
+    local maxScores, indices = logProb:topk(K, true)
+    hypothesis[2] = indices[1]
+    scores = maxScores[1]:view(-1, 1)
+    prevState = self.decoder:lastState()
+
+    for i = 2, T-1 do
         self.decoder:initState(prevState)
         local curIdx = hypothesis[i]:view(-1, 1)
         local outputDecoder = self.decoder:forward(curIdx)
