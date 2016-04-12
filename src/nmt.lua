@@ -1,6 +1,8 @@
 require 'torch'
 require 'nn'
 
+-- make sure this script can be run from any folder
+package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])[^\/]-$]] .."?.lua;".. package.path
 
 local Seq2seq
 require 'util.DataLoader'
@@ -102,11 +104,16 @@ if not eval then
     -- training mode
     train()
 else
+    if kwargs.transFile == nil then
+        kwargs.transFile = 'translation.txt'
+    end
     -- use dictionary
     model:use_vocab(loader.vocab)
     model:evaluate()
+    print('loading model ' .. kwargs.modelFile)
     model:load(kwargs.modelFile)
-    local file = io.open('translation.txt', 'w')
+    print('done')
+    local file = io.open(kwargs.transFile, 'w')
     io.output(file)
     for line in io.lines(kwargs.textFile) do
         local translation = model:translate(line, kwargs.beamSize)
