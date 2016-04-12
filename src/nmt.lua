@@ -1,8 +1,12 @@
 require 'torch'
 require 'nn'
 
+-- make sure this script can be run from any folder
+package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])
+
 require 'util.DataLoader'
 
+local timer = torch.Timer()
 torch.manualSeed(42)
 local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
@@ -100,19 +104,38 @@ if not eval then
     -- training mode
     train()
 else
+    if kwargs.transFile == nil then
+        kwargs.transFile = 'translation.txt'
+    end
+
+    local startTime = timer:time().real
+    print('loading model...')
     -- use dictionary
     model:use_vocab(loader.vocab)
     model:evaluate()
     model:load(kwargs.modelFile)
-    local file = io.open('translation.txt', 'w')
-    io.output(file)
-    for line in io.lines(kwargs.textFile) do
-        local translation = model:translate(line, kwargs.beamSize)
-        --print(translation)
-        io.write(translation .. '\n')
-        io.flush()
-    end
-    io.close(file)
-end
+    local loadTime = timer:time().real - startTime
+    print('done, loading time: ' .. loadTime .. ' sec')
+    
+    local file = io.open(kwargs.transFile, 'w')
+    local nbestFile = io.open(kwargs.transFile .. '.nbest', 'w')
 
+    local nbLines = 0
+    for line in io.lines(kwargs.textFile) do
+        nbLines = nbLines + 1
+        local translation, nbestList = model:translate(line, kwargs.beamSize)
+        file:write(translation .. '\n')
+        file:flush()
+        nbestFile:write('SENTID=' .. nbLines .. '\n')
+        nbestFile:write(table.concat(nbestList, '\n') .. '\n')
+        nbestFile:flush()
+    end
+    file:close()
+    nbestFile:close()
+    
+    local transTime = timer:time().real - loadTime
+    print('Done (' .. nbLines .. ' sentences translated)')
+    print('tot time: ' .. transTime .. ' sec')
+    print('time per sentence: ' .. transTime/nbLines .. ' sec')
+end
 
