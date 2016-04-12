@@ -251,7 +251,17 @@ function NMT:translate(x, beamSize, maxLength)
     table.sort(n_best, function(s1, s2)
         return completeHyps[s1] > completeHyps[s2] or completeHyps[s1] > completeHyps[s2] and s1 > s2
     end)
-    return n_best[1]
+    
+    -- prepare n-best list for printing
+    local n_best_list = {}
+    for rank, hypo in pairs(n_best) do
+        local score = string.format('%.4f', completeHyps[hypo])
+        local length = 0
+        for w in hypo:gmatch("%S+") do length = length + 1 end
+        table.insert(n_best_list, 'n=' .. rank .. ' s=' .. score .. ' l=' .. length .. '\t' .. hypo)
+    end
+    
+    return n_best[1], n_best_list
 end
 
 
