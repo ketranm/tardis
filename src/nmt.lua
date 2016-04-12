@@ -7,6 +7,7 @@ package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])[^\/]-$]] .."?.lua;
 local Seq2seq
 require 'util.DataLoader'
 
+local timer = torch.Timer()
 torch.manualSeed(42)
 local configuration = require 'pl.config'
 local kwargs = configuration.read(arg[1])
@@ -107,21 +108,32 @@ else
     if kwargs.transFile == nil then
         kwargs.transFile = 'translation.txt'
     end
+    
+    local startTime = timer:time().real
+    print('loading model...')
     -- use dictionary
     model:use_vocab(loader.vocab)
     model:evaluate()
-    print('loading model ' .. kwargs.modelFile)
     model:load(kwargs.modelFile)
-    print('done')
+    local loadTime = timer:time().real - startTime
+    print('done, loading time: ' .. loadTime .. ' sec')
+    
     local file = io.open(kwargs.transFile, 'w')
-    io.output(file)
+    --io.output(file)
+    local nbLines = 0
     for line in io.lines(kwargs.textFile) do
+        nbLines = nbLines + 1
         local translation = model:translate(line, kwargs.beamSize)
         --print(translation)
-        io.write(translation .. '\n')
-        io.flush()
+        file:write(translation .. '\n')
+        file:flush()
     end
-    io.close(file)
+    file:close()
+    
+    local transTime = timer:time().real - loadTime
+    print('Done (' .. nbLines .. ' sentences translated)')
+    print('tot time: ' .. transTime .. ' sec')
+    print('time per sentence: ' .. transTime/nbLines .. ' sec')
 end
 
 
