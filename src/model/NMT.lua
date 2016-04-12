@@ -241,13 +241,13 @@ function NMT:translate(x, beamSize, maxLength)
         local hypo = self:_decodeString(hypothesis[{{}, k}])
         completeHyps[hypo] = scores[k][1] / (T-1)
     end
-    local n_best = {}
-    for hypo in pairs(completeHyps) do n_best[#n_best + 1] = hypo end
+    local nBest = {}
+    for hypo in pairs(completeHyps) do nBest[#nBest + 1] = hypo end
     -- sort the result and pick the best one
-    table.sort(n_best, function(s1, s2)
+    table.sort(nBest, function(s1, s2)
         return completeHyps[s1] > completeHyps[s2] or completeHyps[s1] > completeHyps[s2] and s1 > s2
     end)
-    return n_best[1]
+    return nBest[1]
 end
 
 
