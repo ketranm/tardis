@@ -65,4 +65,48 @@ function BLEU.score(target, reference)
     return bleu
 end
 
+
+function BLEU._reward(trg, ref)
+    local rewards = {}
+    local ws = stringx.split(trg)
+    local T = #ws
+    for t = 1, T do
+        local trg_t = table.concat(_.sub(ws, 1, t), ' ')
+        local rt = BLEU.score(trg_t, ref)
+        table.insert(rewards, rt)
+    end
+    local average_rewards = {}
+    local future_rewards = {}
+    local r = rewards[T]
+    for t = 1, T do
+        local rt = rewards[t]
+        table.insert(average_rewards, rt/t)
+        table.insert(future_rewards, r - rt)
+    end
+
+    return average_rewards, future_rewards
+end
+
+
+function BLEU._tensor2string(t)
+    local flat_t = t:contiguous():view(-1)
+    local s = {}
+    for i = 1, flat_t:numel() do table.insert(s, flat_t[i]) end
+    return table.concat(s, ' ')
+end
+
+function BLEU.rewardT(trg, ref)
+    local _trg = BLEU._tensor2string(trg)
+    local _ref = BLEU._tensor2string(ref)
+    return BLEU._reward(_trg, _ref)
+end
+
+function BLEU.scoreT(trg, ref)
+    -- compute bleu for tensor
+    -- TODO: more efficient implementation?
+    local _trg = BLEU._tensor2string(trg)
+    local _ref = BLEU._tensor2string(ref)
+    return BLEU.score(_trg, _ref)
+end
+
 return BLEU
