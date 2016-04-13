@@ -182,17 +182,31 @@ function NMT:translate(x, beamSize, maxLength)
         x: source sentence
         beamSize: size of the beam search
     --]]
+
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
+    local id2word = self.id2word
     local idx_GO = trgVocab['<s>']
     local idx_EOS = trgVocab['</s>']
 
+    -- use this to generate clean sentences from ids
+    local _ignore = {[idx_GO] = true, [idx_EOS] = true}
+
     local K = beamSize or 10
-    local T = maxLength or 50
 
-    x = self:_encodeString(x)
-    x = x:expand(K, x:size(2)):typeAs(self.params)
+    x = utils.encodeString(x, srcVocab, true)
+    local srcLength = x:size(2)
+    local T = maxLength or utils.round(srcLength * 1.4)
 
-    local outputEncoder = self.encoder:updateOutput(x)
+    x = x:expand(K, srcLength):typeAs(self.params)
+
+    -- keep output of encoder for future use
+    -- for example, reinforce
+    local _outputEncoder = self.encoder:updateOutput(x)
+    -- maybe put it to buffer
+    self.buffers = {_outputEncoder}
+    
+    local outputEncoder = _outputEncoder
+
     local prevState = self.encoder:lastState()
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
@@ -209,6 +223,7 @@ function NMT:translate(x, beamSize, maxLength)
     local maxScores, indices = logProb:topk(K, true)
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
+
     prevState = self.decoder:lastState()
 
     for i = 2, T-1 do
@@ -227,27 +242,41 @@ function NMT:translate(x, beamSize, maxLength)
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
         local nextIndex = {}
         local expand_k = {}
+        local nextScores = {}
         local k = 1
         while k <= K do
             local logp, index = flat:max(1)
-            local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
+            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
+
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
+
             if yi == idx_EOS then
                 -- complete hypothesis
-                local cand = self:_decodeString(hypothesis[{{}, prev_k}])
+                local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
+                -- reduce beam size
+                K = K - 1
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                scores[k] = logp[1]
+                table.insert(nextScores, logp[1])
                 k = k + 1
             end
         end
+
+        if K < 1 then
+            break
+        end
+
         expand_k = torch.Tensor(expand_k):long()
-        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
+        local nextHypothesis = hypothesis:index(2, expand_k)
         nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
         hypothesis = nextHypothesis
+        scores = torch.Tensor(nextScores):typeAs(x):resize(K,1)
+        
+        -- need to resize outputEncoder
+        outputEncoder = _outputEncoder:sub(1, K)
         -- carry over the state of selected k
         local currState = self.decoder:lastState()
         local nextState = {}
@@ -260,10 +289,15 @@ function NMT:translate(x, beamSize, maxLength)
         end
         prevState = nextState
     end
-    for k = 1, K do
-        local cand = self:_decodeString(hypothesis[{{}, k}])
-        completeHyps[cand] = scores[k][1] / (T-1)
+
+    -- force the produce some output
+    if next(completeHyps) == nil then
+        for k = 1, K do
+            local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
+            completeHyps[cand] = scores[k][1] / (T-1)
+        end
     end
+
     local nBest = {}
     for cand in pairs(completeHyps) do nBest[#nBest + 1] = cand end
     -- sort the result and pick the best one
@@ -291,17 +325,30 @@ function NMT:oracle(x, ref, beamSize, maxLength)
         ref: reference 
         beamSize: size of the beam search
     --]]
+    
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
+    local id2word = self.id2word
     local idx_GO = trgVocab['<s>']
     local idx_EOS = trgVocab['</s>']
-    local ref_tokens = stringx.split(ref)
+
+    -- use this to generate clean sentences from ids
+    local _ignore = {[idx_GO] = true, [idx_EOS] = true}
+
     local K = beamSize or 10
 
-    x = self:_encodeString(x)
-    local T = x:nElement() + 7
-    x = x:expand(K, x:size(2)):typeAs(self.params)
+    x = utils.encodeString(x, srcVocab, true)
+    local srcLength = x:size(2)
+    local T = maxLength or utils.round(srcLength * 1.4)
 
-    local outputEncoder = self.encoder:updateOutput(x)
+    x = x:expand(K, srcLength):typeAs(self.params)
+
+    -- keep output of encoder for future use
+    -- for example, reinforce
+    local _outputEncoder = self.encoder:updateOutput(x)
+    -- maybe put it to buffer
+    self.buffers = {_outputEncoder}
+    
+    local outputEncoder = _outputEncoder
     local prevState = self.encoder:lastState()
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
@@ -340,7 +387,7 @@ function NMT:oracle(x, ref, beamSize, maxLength)
         local logprobs = {}
         for k = 1, K^2 do
             local logp, index = flat:max(1)
-            local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
+            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
             local cand = self:_decodeString(hypothesis[{{}, prev_k}])
@@ -348,6 +395,7 @@ function NMT:oracle(x, ref, beamSize, maxLength)
 
             if yi == idx_EOS then
                 -- complete hypothesis
+                local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
             else
                 table.insert(nextIndex,  yi)
