@@ -118,38 +118,6 @@ end
 Translation functions
 ]]
 
-function flat_to_rc(v, indices, flat_index)
-    local row = math.floor((flat_index - 1)/v:size(2)) + 1
-    return row, indices[row][(flat_index - 1) % v:size(2) + 1]
-end
-
-
-function NMT:_decodeString(x)
-    local ws = {}
-    local vocab = self.trgVocab
-    for i = 1, x:nElement() do
-        local idx = x[i]
-        if idx ~= vocab['<s>'] and idx ~= vocab['</s>'] then
-            ws[#ws + 1] = self.id2word[idx]
-        end
-    end
-    return table.concat(ws, ' ')
-end
-
-
-function NMT:_encodeString(x)
-    -- encode source sentence
-    local xs = stringx.split(x)
-    local xids = {}
-    for i = #xs, 1, -1 do
-        local w = xs[i]
-        local idx = self.srcVocab[w] or self.srcVocab['<unk>']
-        table.insert(xids, idx)
-    end
-    return torch.Tensor(xids):view(1, -1)
-end
-
-
 function NMT:use_vocab(vocab)
     self.srcVocab = vocab[1]
     self.trgVocab = vocab[2]
@@ -160,14 +128,14 @@ function NMT:use_vocab(vocab)
 end
 
 
-function NMT:load(filename)
-    local params = torch.load(filename)
+function NMT:load(fileName)
+    local params = torch.load(fileName)
     self.params:copy(params)
 end
 
 
-function NMT:save(filename)
-    torch.save(filename, self.params)
+function NMT:save(fileName)
+    torch.save(fileName, self.params)
 end
 
 
@@ -177,13 +145,18 @@ function NMT:translate(x, beamSize, maxLength)
         x: source sentence
         beamSize: size of the beam search
     --]]
+
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
+    local id2word = self.id2word
     local idx_GO = trgVocab['<s>']
     local idx_EOS = trgVocab['</s>']
 
+    -- use this to generate clean sentences from ids
+    local _ignore = {[idx_GO] = true, [idx_EOS] = true}
+
     local K = beamSize or 10
 
-    x = self:_encodeString(x)
+    x = utils.encodeString(x, srcVocab, true)
     local srcLength = x:size(2)
     local T = maxLength or utils.round(srcLength * 1.4)
 
@@ -229,12 +202,12 @@ function NMT:translate(x, beamSize, maxLength)
         local k = 1
         while k <= K do
             local logp, index = flat:max(1)
-            local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
+            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
             if yi == idx_EOS then
                 -- complete hypothesis
-                local cand = self:_decodeString(hypothesis[{{}, prev_k}])
+                local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
             else
                 table.insert(nextIndex,  yi)
@@ -262,7 +235,7 @@ function NMT:translate(x, beamSize, maxLength)
         prevState = nextState
     end
     for k = 1, K do
-        local cand = self:_decodeString(hypothesis[{{}, k}])
+        local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
         completeHyps[cand] = scores[k][1] / (T-1)
     end
     local nBest = {}
