@@ -168,7 +168,8 @@ function NMT:translate(x, beamSize, maxLength)
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local completeHyps = {}
-
+    local aliveK = K
+    
     -- avoid using goto
     -- handle the first prediction
     self.decoder:initState(prevState)
@@ -177,30 +178,33 @@ function NMT:translate(x, beamSize, maxLength)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
     local maxScores, indices = logProb:topk(K, true)
+
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
-
     prevState = self.decoder:lastState()
-
+   
     for i = 2, T-1 do
+
         self.decoder:initState(prevState)
         local curIdx = hypothesis[i]:view(-1, 1)
         local outputDecoder = self.decoder:forward(curIdx)
         local context = self.glimpse:forward({outputEncoder, outputDecoder})        
         local logProb = self.layer:forward({context, outputDecoder})
-
         local maxScores, indices = logProb:topk(K, true)
+
         -- previous scores
         local curScores = scores:repeatTensor(1, K)
         -- add them to current ones
         maxScores:add(curScores)
-
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
+                
         local nextIndex = {}
         local expand_k = {}
         local nextScores = {}
-        local k = 1
-        while k <= K do
+        local nextAliveK = 0
+        --local nextScores = torch.Tensor():typeAs(x):resize(aliveK, 1)
+        --while k <= aliveK do
+        for k = 1, aliveK do
             local logp, index = flat:max(1)
             local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
@@ -213,28 +217,40 @@ function NMT:translate(x, beamSize, maxLength)
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
                 table.insert(nextScores, logp[1])
-                k = k + 1
+                nextAliveK = nextAliveK + 1
             end
         end
-        expand_k = torch.Tensor(expand_k):long()
-        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
-        nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
-        hypothesis = nextHypothesis
-        scores = torch.Tensor(nextScores):typeAs(x):resize(K,1)
+        if nextAliveK == 0 then
+            -- nothing left in the beam to expand
+            aliveK = nextAliveK
+            break
+        else
+            expand_k = torch.Tensor(expand_k):long()
+            local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
+            -- note: at this point nextHypothesis may contain less than aliveK hypotheses
+            nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
+            hypothesis = nextHypothesis
+            scores = torch.Tensor(nextScores):typeAs(x):resize(nextAliveK,1)
         
-        -- carry over the state of selected k
-        local currState = self.decoder:lastState()
-        local nextState = {}
-        for _, state in ipairs(currState) do
-            local sk = {}
-            for _, s in ipairs(state) do
-                table.insert(sk, s:index(1, expand_k))
+            if nextAliveK < aliveK then
+                outputEncoder = outputEncoder[{{1,nextAliveK}}]
             end
-            table.insert(nextState, sk)
+
+            -- carry over the state of selected k
+            local currState = self.decoder:lastState()
+            local nextState = {}
+            for _, state in ipairs(currState) do
+                local sk = {}
+                for _, s in ipairs(state) do
+                    table.insert(sk, s:index(1, expand_k))
+                end
+                table.insert(nextState, sk)
+            end
+            prevState = nextState
         end
-        prevState = nextState
+        aliveK = nextAliveK
     end
-    for k = 1, K do
+    for k = 1, aliveK do
         local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
         completeHyps[cand] = scores[k][1] / (T-1)
     end
