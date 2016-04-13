@@ -20,13 +20,14 @@ function utils.encodeString(input, vocab, reverse)
     return torch.Tensor(ids):view(1, -1)
 end
 
-function utils.decodeString(x, id2word)
+function utils.decodeString(x, id2word, _ignore)
     -- map tensor if indices to surface words
     local words = {}
-    local flat_x = x:view(-1)
-    for i = 1, flat_x:numel() do
-        local idx = flat_x[i]
-        table.insert(words, id2word[idx])
+    for i = 1, x:numel() do
+        local idx = x[i]
+        if not _ignore[idx] then
+            table.insert(words, id2word[idx])
+        end
     end
     return table.concat(words, ' ')
 end
