@@ -104,9 +104,7 @@ if not eval then
     -- training mode
     train()
 else
-    if kwargs.transFile == nil then
-        kwargs.transFile = 'translation.txt'
-    end
+    kwargs.transFile =  kwargs.transFile or 'translation.txt'
 
     local startTime = timer:time().real
     print('loading model...')
