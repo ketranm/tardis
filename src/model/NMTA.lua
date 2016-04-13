@@ -206,6 +206,7 @@ function NMT:translate(x, beamSize, maxLength)
     local maxScores, indices = logProb:topk(K, true)
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
+
     prevState = self.decoder:lastState()
 
     for i = 2, T-1 do
@@ -224,6 +225,7 @@ function NMT:translate(x, beamSize, maxLength)
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
         local nextIndex = {}
         local expand_k = {}
+        local nextScores = {}
         local k = 1
         while k <= K do
             local logp, index = flat:max(1)
@@ -237,7 +239,7 @@ function NMT:translate(x, beamSize, maxLength)
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                scores[k] = logp[1]
+                table.insert(nextScores, logp[1])
                 k = k + 1
             end
         end
@@ -245,6 +247,8 @@ function NMT:translate(x, beamSize, maxLength)
         local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
         nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
         hypothesis = nextHypothesis
+        scores = torch.Tensor(nextScores):typeAs(x):resize(K,1)
+        
         -- carry over the state of selected k
         local currState = self.decoder:lastState()
         local nextState = {}
