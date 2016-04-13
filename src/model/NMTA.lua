@@ -8,6 +8,7 @@ url: http://www.aclweb.org/anthology/D15-1166
 require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
+local utils = require 'util.utils'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -181,10 +182,12 @@ function NMT:translate(x, beamSize, maxLength)
     local idx_EOS = trgVocab['</s>']
 
     local K = beamSize or 10
-    local T = maxLength or 50
 
     x = self:_encodeString(x)
-    x = x:expand(K, x:size(2)):typeAs(self.params)
+    local srcLength = x:size(2)
+    local T = maxLength or utils.round(srcLength * 1.4)
+
+    x = x:expand(K, srcLength):typeAs(self.params)
 
     local outputEncoder = self.encoder:updateOutput(x)
     local prevState = self.encoder:lastState()

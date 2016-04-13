@@ -53,6 +53,9 @@ function utils.write_json(path, obj)
   f:close()
 end
 
-
+function utils.round(num, idp)
+  local mult = 10^(idp or 0)
+  return math.floor(num * mult + 0.5) / mult
+end
 
 return utils
