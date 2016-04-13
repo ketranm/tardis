@@ -115,9 +115,9 @@ else
     model:evaluate()
     model:load(kwargs.modelFile)
     local loadTime = timer:time().real - startTime
-    print('done, loading time: ' .. loadTime .. ' sec')
+    print(string.format('done, loading time: %.4f sec', loadTime))
     timer:reset()
-    
+
     local file = io.open(kwargs.transFile, 'w')
     local nbestFile = io.open(kwargs.transFile .. '.nbest', 'w')
 
@@ -133,9 +133,9 @@ else
     end
     file:close()
     nbestFile:close()
-    
+
     local transTime = timer:time().real
-    print('Done (' .. nbLines .. ' sentences translated)')
-    print('tot time: ' .. transTime .. ' sec')
-    print('time per sentence: ' .. transTime/nbLines .. ' sec')
+    print(string.format('Done (%d) sentences translated', nbLines))
+    print(string.format('Total time: %.4f sec', transTime))
+    print(string.format('Time per sentence: %.4f', transTime/nbLines))
 end

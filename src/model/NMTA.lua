@@ -263,11 +263,12 @@ function NMT:translate(x, beamSize, maxLength)
 
     -- prepare n-best list for printing
     local nBestList = {}
-    for rank, hypo in pairs(nBest) do
+    for rank, hypo in ipairs(nBest) do
         local score = string.format('%.4f', completeHyps[hypo])
-        local length = 0
-        for w in hypo:gmatch("%S+") do length = length + 1 end
-        table.insert(nBestList, 'n=' .. rank .. ' s=' .. score .. ' l=' .. length .. '\t' .. hypo)
+        -- stringx.count is fast
+        local length = stringx.count(hypo, ' ') + 1
+        --for w in hypo:gmatch("%S+") do length = length + 1 end
+        table.insert(nBestList, string.format('n=%d s=%.4f l=%d\t%s',  rank, score, length, hypo))
     end
   
     return nBest[1], nBestList
