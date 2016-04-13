@@ -7,8 +7,10 @@ url: http://www.aclweb.org/anthology/D15-1166
 
 require 'model.Transducer'
 require 'model.GlimpseDot'
-local bleu = require 'model.BLEU'
+local bleu = require 'util.BLEU'
 local model_utils = require 'model.model_utils'
+local _ = require 'moses'
+
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -36,9 +38,9 @@ function NMT:__init(kwargs)
     self.layer:add(nn.Linear(2 * kwargs.hiddenSize, kwargs.hiddenSize, false))
     self.layer:add(nn.ELU(1, true))
     self.layer:add(nn.Linear(kwargs.hiddenSize, kwargs.trgVocabSize, true))
-    self.layer:add(nn.LogSoftMax())
-
-    self.criterion = nn.ClassNLLCriterion()
+    --self.layer:add(nn.SoftMax())
+    self.softmax = nn.SoftMax()
+    self.criterion = nn.CrossEntropyCriterion()
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
     self.maxNorm = kwargs.maxNorm or 5
     self.buffers = {}
@@ -174,7 +176,7 @@ end
 function NMT:translate(x, beamSize, maxLength)
     --[[Translate input sentence with beam search
     Args:
-        x: source sentence, (1, T) Tensor
+        x: source sentence
         beamSize: size of the beam search
     --]]
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
@@ -193,7 +195,20 @@ function NMT:translate(x, beamSize, maxLength)
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local completeHyps = {}
-    for i = 1, T-1 do
+
+    -- avoid using goto
+    -- handle the first prediction
+    self.decoder:initState(prevState)
+    local curIdx = hypothesis[1]:view(-1, 1)
+    local outputDecoder = self.decoder:forward(curIdx)
+    local context = self.glimpse:forward({outputEncoder, outputDecoder})
+    local logProb = self.layer:forward({context, outputDecoder})
+    local maxScores, indices = logProb:topk(K, true)
+    hypothesis[2] = indices[1]
+    scores = maxScores[1]:view(-1, 1)
+    prevState = self.decoder:lastState()
+
+    for i = 2, T-1 do
         self.decoder:initState(prevState)
         local curIdx = hypothesis[i]:view(-1, 1)
         local outputDecoder = self.decoder:forward(curIdx)
@@ -211,7 +226,7 @@ function NMT:translate(x, beamSize, maxLength)
         local expand_k = {}
         local k = 1
         while k <= K do
-            local score, index = flat:max(1)
+            local logp, index = flat:max(1)
             local prev_k, yi = flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time 
             flat[index[1]] = -math.huge
@@ -222,7 +237,7 @@ function NMT:translate(x, beamSize, maxLength)
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                scores[k] = score[1]
+                scores[k] = logp[1]
                 k = k + 1
             end
         end
@@ -242,11 +257,9 @@ function NMT:translate(x, beamSize, maxLength)
         end
         prevState = nextState
     end
-    if #completeHyps == 0 then
-        for k = 1, K do
-            local cand = self:_decodeString(hypothesis[{{}, k}])
-            completeHyps[cand] = scores[k][1] / (T-1)
-        end
+    for k = 1, K do
+        local cand = self:_decodeString(hypothesis[{{}, k}])
+        completeHyps[cand] = scores[k][1] / (T-1)
     end
     local nBest = {}
     for cand in pairs(completeHyps) do nBest[#nBest + 1] = cand end
@@ -254,8 +267,19 @@ function NMT:translate(x, beamSize, maxLength)
     table.sort(nBest, function(c1, c2)
         return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
-    return nBest[1]
+
+    -- prepare n-best list for printing
+    local nBestList = {}
+    for rank, hypo in pairs(nBest) do
+        local score = string.format('%.4f', completeHyps[hypo])
+        local length = 0
+        for w in hypo:gmatch("%S+") do length = length + 1 end
+        table.insert(nBestList, 'n=' .. rank .. ' s=' .. score .. ' l=' .. length .. '\t' .. hypo)
+    end
+  
+    return nBest[1], nBestList
 end
+
 
 function NMT:oracle(x, ref, beamSize, maxLength)
     --[[Translate input sentence with beam search
@@ -281,7 +305,18 @@ function NMT:oracle(x, ref, beamSize, maxLength)
     local ibleu = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
     local completeHyps = {}
-    for i = 1, T-1 do
+
+    self.decoder:initState(prevState)
+    local curIdx = hypothesis[1]:view(-1, 1)
+    local outputDecoder = self.decoder:forward(curIdx)
+    local context = self.glimpse:forward({outputEncoder, outputDecoder})
+    local logProb = self.layer:forward({context, outputDecoder})
+    local maxScores, indices = logProb:topk(K, true)
+    hypothesis[2] = indices[1]
+    scores = maxScores[1]:view(-1, 1)
+    prevState = self.decoder:lastState()
+
+    for i = 2, T-1 do
         self.decoder:initState(prevState)
         local curIdx = hypothesis[i]:view(-1, 1)
         local outputDecoder = self.decoder:forward(curIdx)
@@ -323,11 +358,6 @@ function NMT:oracle(x, ref, beamSize, maxLength)
         expand_k = torch.Tensor(expand_k):index(1, ids:long()):long()
         nextIndex = torch.Tensor(nextIndex):index(1, ids)
         scores = torch.CudaTensor(logprobs):index(1, ids):view(K, 1)
-        --[[
-        --for i = 1, K do
-        --    scores[i] = logprobs[ids[i]]
-        --end
-        --]]
 
         local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
         nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
@@ -358,6 +388,113 @@ function NMT:oracle(x, ref, beamSize, maxLength)
         return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
     return nBest[1]
+end
+
+
+function NMT:_reward(cand, ref)
+    local rewards = {}
+    local ws = stringx.split(cand)
+    local T = #ws
+    --print('candidate: ', cand)
+    --print('reference: ', ref)
+    for t = 1, T do
+        local cand_t = table.concat(_.sub(ws, 1, t), ' ')
+        --print('cand ', t, cand_t)
+        local rt = bleu.score(cand_t, ref)
+        table.insert(rewards, rt)
+    end
+    local average_rewards = {}
+    local future_rewards = {}
+    local r = rewards[T]
+    for t = 1, T do
+        local rt = rewards[t]
+        table.insert(average_rewards, rt/t)
+        table.insert(future_rewards, r - rt)
+    end
+
+    return average_rewards, future_rewards
+end
+
+function NMT:_tensor2string(t)
+    local flat_t = t:contiguous():view(-1)
+    local s = {}
+    for i = 1, flat_t:numel() do table.insert(s, flat_t[i]) end
+    return table.concat(s, ' ')
+end
+
+function NMT:_rewardT(cand, ref)
+    local _cand = self:_tensor2string(cand)
+    local _ref = self:_tensor2string(ref)
+    return self:_reward(_cand, _ref)
+end
+
+function NMT:_sample(input, rollinStep)
+    local outputEncoder = self.encoder:updateOutput(input[1])
+    -- we then initialize the decoder with the last state of the encoder
+    self.decoder:initState(self.encoder:lastState())
+    -- this code is not efficient at the moment
+    local refPrefixInput = input[2]:narrow(2, 1, rollinStep)
+    local outputDecoder = self.decoder:updateOutput(refPrefixInput)
+    local lastOuputDecoder = outputDecoder[{{},{-1},{}}]
+    local context = self.glimpse:forward({outputEncoder, lastOuputDecoder})
+    local energy = self.layer:forward({context, lastOuputDecoder})
+    local prob = self.softmax:forward(energy)
+
+    local trg = input[2]:clone()
+    local sampled = torch.multinomial(prob, 1)
+    local rolloutStep = input[2]:size(2) - rollinStep
+
+    
+    for i = 1, rolloutStep do
+        trg[{{}, rollinStep + i}] = sampled
+        lastOuputDecoder =  self.decoder:updateOutput(sampled)
+        context = self.glimpse:forward({outputEncoder, lastOuputDecoder})
+        energy = self.layer:forward({context, lastOuputDecoder})
+        local prob = self.softmax:forward(energy)
+        sampled = torch.multinomial(prob, 1)
+    end
+    self.buffers = {outputEncoder}
+    return trg
+end
+
+function NMT:reinforce(input, ref, rollinStep)
+    local sampled = self:_sample(input, rollinStep)
+    local outputEncoder = self.buffers[1]
+
+    self.decoder:initState(self.encoder:lastState())
+    local outputDecoder = self.decoder:updateOutput(sampled)
+    local context = self.glimpse:forward({outputEncoder, outputDecoder})
+    local energy = self.layer:forward({context, outputDecoder})
+
+    local nextTarget = sampled:clone()
+    nextTarget:sub(1,-1,1,-2):copy(sampled:sub(1,-1,2,-1))
+    nextTarget:sub(1,-1,-1,-1):fill(self.trgVocab["</s>"])
+    
+    ref = ref:view(#nextTarget)
+    local aR = torch.Tensor(#ref)
+    local fR = torch.Tensor(#ref)
+    for i = 1, ref:size(1) do
+        local ar_, fr_ = self:_rewardT(nextTarget[i], ref[i])
+        aR[i] = torch.Tensor(ar_)
+        fR[i] = torch.Tensor(fr_)
+    end
+
+    local flat_ar = aR:typeAs(self.params):view(-1)
+    local flat_fr = fR:typeAs(self.params):view(-1, 1)
+    self.criterion:forward(energy, nextTarget:view(-1))
+    local xentGrad = self.criterion:backward(energy, nextTarget:view(-1))
+    local grad_fR = flat_fr:expand(#xentGrad)
+    xentGrad:cmul(grad_fR)
+    
+    local gradLayer = self.layer:backward({context, outputDecoder}, xentGrad)
+    local gradGlimpse = self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
+    local gradDecoder = gradLayer[2]
+    gradDecoder:add(gradGlimpse[2])
+
+    self.decoder:backward(sampled, gradDecoder)
+    self.encoder:setGradState(self.decoder:getGradState())
+    local gradEncoder = gradGlimpse[1]
+    self.encoder:backward(input[1], gradEncoder)
 end
 
 function NMT:clearState()
