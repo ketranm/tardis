@@ -116,11 +116,12 @@ else
     model:load(kwargs.modelFile)
     local loadTime = timer:time().real - startTime
     print('done, loading time: ' .. loadTime .. ' sec')
+    timer:reset()
     
     local file = io.open(kwargs.transFile, 'w')
     local nbestFile = io.open(kwargs.transFile .. '.nbest', 'w')
 
-    local nbLines = 0
+    local nbLines = 0   
     for line in io.lines(kwargs.textFile) do
         nbLines = nbLines + 1
         local translation, nbestList = model:translate(line, kwargs.beamSize, kwargs.maxTrgLength)
@@ -133,7 +134,7 @@ else
     file:close()
     nbestFile:close()
     
-    local transTime = timer:time().real - loadTime
+    local transTime = timer:time().real
     print('Done (' .. nbLines .. ' sentences translated)')
     print('tot time: ' .. transTime .. ' sec')
     print('time per sentence: ' .. transTime/nbLines .. ' sec')
