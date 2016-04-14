@@ -39,6 +39,10 @@ function NMT:__init(kwargs)
     self.layer:add(nn.LogSoftMax())
 
     self.criterion = nn.ClassNLLCriterion()
+    -- TODO: set sizeAverage = false
+    -- this is because the batch size varies during training
+    self.criterion.sizeAverage = false
+
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
     self.maxNorm = kwargs.maxNorm or 5
     self.buffers = {}
@@ -139,7 +143,7 @@ function NMT:save(fileName)
 end
 
 
-function NMT:translate(x, beamSize, topWords, maxLength)
+function NMT:translate(x, beamSize, numTopWords, maxLength)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence
@@ -157,7 +161,7 @@ function NMT:translate(x, beamSize, topWords, maxLength)
     -- number of hypotheses kept in the beam
     local K = beamSize or 10
     -- number of top words selected from the vocabulary distribution output by the model
-    local W = topWords or K
+    local Nw = numTopWords or K
 
     x = utils.encodeString(x, srcVocab, true)
     local srcLength = x:size(2)
@@ -184,7 +188,7 @@ function NMT:translate(x, beamSize, topWords, maxLength)
     local outputDecoder = self.decoder:forward(curIdx)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
-    local maxScores, indices = logProb:topk(K, true)  -- should be K not W for the first prediction only
+    local maxScores, indices = logProb:topk(K, true)  -- should be K not Nw for the first prediction only
 
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
@@ -197,10 +201,10 @@ function NMT:translate(x, beamSize, topWords, maxLength)
         local outputDecoder = self.decoder:forward(curIdx)
         local context = self.glimpse:forward({outputEncoder, outputDecoder})
         local logProb = self.layer:forward({context, outputDecoder})
-        local maxScores, indices = logProb:topk(W, true)
+        local maxScores, indices = logProb:topk(Nw, true)
 
         -- previous scores
-        local curScores = scores:repeatTensor(1, W)
+        local curScores = scores:repeatTensor(1, Nw)
         -- add them to current ones
         maxScores:add(curScores)
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
