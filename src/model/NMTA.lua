@@ -181,7 +181,7 @@ function NMT:translate(x, beamSize, maxLength)
     local outputDecoder = self.decoder:forward(curIdx)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
-    local maxScores, indices = logProb:topk(aliveK, true)
+    local maxScores, indices = logProb:topk(K, true)
 
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
@@ -197,7 +197,7 @@ function NMT:translate(x, beamSize, maxLength)
         local maxScores, indices = logProb:topk(aliveK, true)
 
         -- previous scores
-        local curScores = scores:repeatTensor(1, aliveK)
+        local curScores = scores:repeatTensor(1, K)
         -- add them to current ones
         maxScores:add(curScores)
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
@@ -206,8 +206,8 @@ function NMT:translate(x, beamSize, maxLength)
         local expand_k = {}
         local nextScores = {}
 
-        local k = 1
-        while k <= aliveK do
+        local nextAliveK = 0
+        for k = 1, aliveK do
             local logp, index = flat:max(1)
             local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
             -- make it -INF so we will not select it next time
@@ -217,16 +217,16 @@ function NMT:translate(x, beamSize, maxLength)
                 -- complete hypothesis
                 local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
-                aliveK = aliveK - 1
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
                 table.insert(nextScores, logp[1])
-                k = k + 1
+                nextAliveK = nextAliveK + 1
             end
         end
 
         -- nothing left in the beam to expand
+        aliveK = nextAliveK
         if aliveK == 0 then break end
 
 
