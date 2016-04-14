@@ -122,7 +122,7 @@ else
     local nbLines = 0   
     for line in io.lines(kwargs.textFile) do
         nbLines = nbLines + 1
-        local translation, nbestList = model:translate(line, kwargs.beamSize, kwargs.maxTrgLength)
+        local translation, nbestList = model:translate(line, kwargs.beamSize, kwargs.topWords, kwargs.maxTrgLength)
         file:write(translation .. '\n')
         file:flush()
         nbestFile:write('SENTID=' .. nbLines .. '\n')

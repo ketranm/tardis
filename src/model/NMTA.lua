@@ -139,7 +139,7 @@ function NMT:save(fileName)
 end
 
 
-function NMT:translate(x, beamSize, maxLength)
+function NMT:translate(x, beamSize, topWords, maxLength)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence
@@ -154,7 +154,10 @@ function NMT:translate(x, beamSize, maxLength)
     -- use this to generate clean sentences from ids
     local _ignore = {[idx_GO] = true, [idx_EOS] = true}
 
+    -- number of hypotheses kept in the beam
     local K = beamSize or 10
+    -- number of top words selected from the vocabulary distribution output by the model
+    local W = topWords or K
 
     x = utils.encodeString(x, srcVocab, true)
     local srcLength = x:size(2)
@@ -181,7 +184,7 @@ function NMT:translate(x, beamSize, maxLength)
     local outputDecoder = self.decoder:forward(curIdx)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
-    local maxScores, indices = logProb:topk(K, true)
+    local maxScores, indices = logProb:topk(K, true)  -- should be K not W for the first prediction only
 
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
@@ -194,10 +197,10 @@ function NMT:translate(x, beamSize, maxLength)
         local outputDecoder = self.decoder:forward(curIdx)
         local context = self.glimpse:forward({outputEncoder, outputDecoder})
         local logProb = self.layer:forward({context, outputDecoder})
-        local maxScores, indices = logProb:topk(aliveK, true)
+        local maxScores, indices = logProb:topk(W, true)
 
         -- previous scores
-        local curScores = scores:repeatTensor(1, K)
+        local curScores = scores:repeatTensor(1, W)
         -- add them to current ones
         maxScores:add(curScores)
         local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
