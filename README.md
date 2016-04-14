@@ -4,7 +4,6 @@ Tardis stands for Time And Relative Dimension In Space
 
 A Neural Machine Translation (NMT) system developed at ILPS, University of Amsterdam.
 
-
 # Features
 
 - standard Seq2seq model
