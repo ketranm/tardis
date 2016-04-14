@@ -32,6 +32,11 @@ function GlimpseDot:updateOutput(input)
     return self.output
 end
 
+function GlimpseDot:getAttention()
+    -- return attention distribution
+    return self.att
+end
+
 function GlimpseDot:backward(input, gradOutput, scale)
     scale = scale or 1.0
     local x, y = input[1], input[2]
