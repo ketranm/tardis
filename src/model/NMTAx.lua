@@ -366,13 +366,15 @@ function NMT:reinforce(input, ref, rollinStep)
     local relReward = reward:view(-1):add(-1, baseline:view(-1))
     -- should average reward of the same word
 
-    self.reward:fill(0):indexCopy(1, nextTarget:view(-1):long(), relReward)
+    self.reward:fill(0):indexCopy(1, nextTarget:view(-1):long(), reward:view(-1))
     -- this trick is used to normalized the reward
     --self.buffer_r:fill(1e-10):indexAdd(1, nextTarget:view(-1):long(), torch.ones(nextTarget:numel()))
     --self.reward:cdiv(self.buffer_r)
 
     self.criterion.weights = self.reward
     local rl_loss = self.criterion:forward(logProb, nextTarget:view(-1))
+    self.reward:fill(0):indexCopy(1, nextTarget:view(-1):long(), relReward)
+    self.criterion.weights = self.reward
     local xentGrad = self.criterion:backward(logProb, nextTarget:view(-1))
 
     local gradLayer = self.layer:backward({context, outputDecoder}, xentGrad)
