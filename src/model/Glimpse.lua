@@ -92,6 +92,11 @@ end
 
 Glimpse.sharedAccUpdateGradParameters = Glimpse.accUpdateGradParameters
 
+function Glimpse:getAttention()
+    -- return attention distribution
+    return self.att
+end
+
 function Glimpse:clearState()
     self.mul_buffer.set()
     self.att_buffer.set()
