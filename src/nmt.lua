@@ -5,6 +5,9 @@ require 'nn'
 package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])[^\/]-$]] .."?.lua;".. package.path
 
 require 'util.DataLoader'
+require 'model.NMTA' -- use attention by default
+require 'tardis.BeamSearch'
+
 
 local timer = torch.Timer()
 torch.manualSeed(42)
@@ -22,11 +25,6 @@ end
 
 print('Experiment Setting: ', kwargs)
 
-if kwargs.attention == 1 then
-    require 'model.NMTA'
-else
-    require 'model.NMT'
-end
 
 local model = nn.NMT(kwargs)
 
@@ -108,9 +106,6 @@ else
 
     local startTime = timer:time().real
     print('loading model...')
-    -- use dictionary
-    model:use_vocab(loader.vocab)
-    model:evaluate()
     model:load(kwargs.modelFile)
     local loadTime = timer:time().real - startTime
     print(string.format('done, loading time: %.4f sec', loadTime))
@@ -124,13 +119,17 @@ else
         refFile = io.open(kwargs.refFile, 'r')  
     end
             
+    -- creat beam search object
+    kwargs.srcVocab, kwargs.trgVocab = unpack(loader.vocab)
+    local bs = BeamSearch(kwargs)
+    bs:use(model)
+
     local refLine
     local nbLines = 0 
     for line in io.lines(kwargs.textFile) do
         nbLines = nbLines + 1
         if refFile then refLine = refFile:read() end
-        local translation, nbestList = model:translate(line,
-            kwargs.beamSize, kwargs.numTopWords, kwargs.maxTrgLength, refLine)
+        local translation, nbestList = bs:search(line, kwargs.maxTrgLength, refLine)
         file:write(translation .. '\n')
         file:flush()
         nbestFile:write('SENTID=' .. nbLines .. '\n')
