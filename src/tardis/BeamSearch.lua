@@ -1,6 +1,6 @@
 -- Beam search
 local utils = require 'util.utils'
-
+local BLEU = require 'utils.BLEU'
 local BeamSearch = torch.class('BeamSearch')
 
 
@@ -21,17 +21,24 @@ function BeamSearch:__init(kwargs)
     self.Nw = kwargs.numTopWords or self.K
 end
 
-function BeamSearch:use(nmt)
-    self.nmt = nmt
-    self.nmt:evaluate() -- no dropout during testing
-    self.dtype = nmt.params:type()
+function BeamSearch:use(model)
+    self.model = model
+    self.model:evaluate() -- no dropout during testing
+    self.dtype = model.params:type()
 end
 
-function BeamSearch:search(x, maxLength)
+function BeamSearch:search(x, maxLength, ref)
+    --[[
+    Beam search:
+    - x: source sentence
+    - maxLength: maximum length of the translation
+    - ref: opition, if it is provided, report sentence BLEU score   
+    ]]
 
-    local K, Nw = self.K, self.Nw
+    -- use this to generate clean sentences from ids
     local _ignore = self._ignore
     local id2word = self.id2word
+    local K, Nw = self.K, self.Nw
 
     x = utils.encodeString(x, self.srcVocab, true)
     local srcLength = x:size(2)
@@ -39,8 +46,7 @@ function BeamSearch:search(x, maxLength)
 
     x = x:expand(K, srcLength):type(self.dtype)
 
-    -- encode the source sentence
-    self.nmt:stepEncoder(x)
+    self.model:stepEncoder(x)
 
     local scores = torch.zeros(K, 1):type(self.dtype)
     local hypothesis = torch.zeros(T, K):fill(self.idx_GO):type(self.dtype)
@@ -50,24 +56,22 @@ function BeamSearch:search(x, maxLength)
     -- avoid using goto
     -- handle the first prediction
     local curIdx = hypothesis[1]:view(-1, 1)
-    local logProb = self.nmt:stepDecoder(curIdx)
+    local logProb = self.model:stepDecoder(curIdx)
+    local maxScores, indices = logProb:topk(K, true)  -- should be K not Nw for the first prediction only
 
-    -- should be K not Nw for the first prediction only
-    local maxScores, indices = logProb:topk(K, true)
-    --print(indices[1], hypothesis[2])
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
 
     for i = 2, T-1 do
         local curIdx = hypothesis[i]:view(-1, 1)
-        local logProb = self.nmt:stepDecoder(curIdx)
+        local logProb = self.model:stepDecoder(curIdx)
         local maxScores, indices = logProb:topk(Nw, true)
 
         -- previous scores
         local curScores = scores:repeatTensor(1, Nw)
         -- add them to current ones
         maxScores:add(curScores)
-        local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
+        local flat = maxScores:view(-1)
 
         local nextIndex = {}
         local expand_k = {}
@@ -77,11 +81,10 @@ function BeamSearch:search(x, maxLength)
         for k = 1, aliveK do
             local logp, index = flat:max(1)
             local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
-
             -- make it -INF so we will not select it next time
             flat[index[1]] = -math.huge
 
-            if yi == idx_EOS then
+            if yi == self.idx_EOS then
                 -- complete hypothesis
                 local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
@@ -103,14 +106,13 @@ function BeamSearch:search(x, maxLength)
         -- note: at this point nextHypothesis may contain aliveK hypotheses
         nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
         hypothesis = nextHypothesis
-        scores = torch.Tensor(nextScores):view(-1, 1):type(self.dtype)
+        scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1)
 
-        local buffers = self.nmt.buffers -- shouldn't do this
+        local buffers = self.model.buffers
         outputEncoder = buffers[1]:sub(1, aliveK)
         buffers[1] = outputEncoder
-        local nextState = self.nmt:indexDecoderState(expand_k)
+        local nextState = self.model:indexDecoderState(expand_k)
         buffers[2] = nextState
-        self.nmt.buffers = buffers
     end
 
 
@@ -128,10 +130,17 @@ function BeamSearch:search(x, maxLength)
 
     -- prepare n-best list for printing
     local nBestList = {}
+    local msg
     for rank, hypo in ipairs(nBest) do
         -- stringx.count is fast
         local length = stringx.count(hypo, ' ') + 1
-        table.insert(nBestList, string.format('n=%d s=%.4f l=%d\t%s',  rank, completeHyps[hypo], length, hypo))
+        if ref then
+            local reward = BLEU.score(hypo, ref) * 100  -- rescale for readability
+            msg = string.format('n=%d s=%.4f l=%d b=%.4f\t%s',  rank, completeHyps[hypo], length, reward, hypo)
+        else
+            msg = string.format('n=%d s=%.4f l=%d\t%s',  rank, completeHyps[hypo], length, hypo)
+        end
+        table.insert(nBestList, msg)
     end
 
     return nBest[1], nBestList
