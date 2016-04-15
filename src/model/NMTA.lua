@@ -106,21 +106,17 @@ function NMT:parameters()
     return self.params
 end
 
-
 function NMT:training()
     self.encoder:training()
     self.decoder:training()
 end
-
 
 function NMT:evaluate()
     self.encoder:evaluate()
     self.decoder:evaluate()
 end
 
---[[
-Translation functions
-]]
+-- Translation functions ---------------------
 
 function NMT:use_vocab(vocab)
     self.srcVocab = vocab[1]
@@ -142,12 +138,48 @@ function NMT:save(fileName)
     torch.save(fileName, self.params)
 end
 
+-- useful interface for beam search
+
+function NMT:stepEncoder(x)
+    local outputEncoder = self.encoder:updateOutput(x)
+    local prevState = self.encoder:lastState()
+    self.buffers = {outputEncoder, prevState}
+end
+
+function NMT:stepDecoder(x)
+    -- run the decode one step
+    local outputEncoder, prevState = unpack(self.buffers)
+    self.decoder:initState(prevState)
+    local outputDecoder = self.decoder:updateOutput(x)
+    local context = self.glimpse:forward({outputEncoder, outputDecoder})
+    local logProb = self.layer:forward({context, outputDecoder})
+    -- update prevState
+    self.buffers[2] = self.decoder:lastState()
+    return logProb
+end
+
+function NMT:indexDecoderState(index)
+    -- similar to torch.index function
+    -- return a new state of kept index
+    local currState = self.decoder:lastState()
+    local newState = {}
+    for _, state in ipairs(currState) do
+        local sk = {}
+        for _, s in ipairs(state) do
+            table.insert(sk, s:index(1, index))
+        end
+        table.insert(newState, sk)
+    end
+
+    return newState
+end
 
 function NMT:translate(x, beamSize, numTopWords, maxLength)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence
         beamSize: size of the beam search
+        we use self.buffers to keep track of outputEncoder and prevState
     --]]
 
     local srcVocab, trgVocab = self.srcVocab, self.trgVocab
@@ -169,12 +201,7 @@ function NMT:translate(x, beamSize, numTopWords, maxLength)
 
     x = x:expand(K, srcLength):typeAs(self.params)
 
-    -- keep output of encoder for future use
-    -- for example, reinforce
-    local _outputEncoder = self.encoder:updateOutput(x)
-    local outputEncoder = _outputEncoder
-
-    local prevState = self.encoder:lastState()
+    self:stepEncoder(x)
 
     local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
     local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
@@ -183,24 +210,16 @@ function NMT:translate(x, beamSize, numTopWords, maxLength)
 
     -- avoid using goto
     -- handle the first prediction
-    self.decoder:initState(prevState)
     local curIdx = hypothesis[1]:view(-1, 1)
-    local outputDecoder = self.decoder:forward(curIdx)
-    local context = self.glimpse:forward({outputEncoder, outputDecoder})
-    local logProb = self.layer:forward({context, outputDecoder})
+    local logProb = self:stepDecoder(curIdx)
     local maxScores, indices = logProb:topk(K, true)  -- should be K not Nw for the first prediction only
 
     hypothesis[2] = indices[1]
     scores = maxScores[1]:view(-1, 1)
-    prevState = self.decoder:lastState()
 
     for i = 2, T-1 do
-
-        self.decoder:initState(prevState)
         local curIdx = hypothesis[i]:view(-1, 1)
-        local outputDecoder = self.decoder:forward(curIdx)
-        local context = self.glimpse:forward({outputEncoder, outputDecoder})
-        local logProb = self.layer:forward({context, outputDecoder})
+        local logProb = self:stepDecoder(curIdx)
         local maxScores, indices = logProb:topk(Nw, true)
 
         -- previous scores
@@ -242,21 +261,12 @@ function NMT:translate(x, beamSize, numTopWords, maxLength)
         -- note: at this point nextHypothesis may contain aliveK hypotheses
         nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
         hypothesis = nextHypothesis
-        scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1) --:resize(aliveK,1)
+        scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1)
 
-        outputEncoder = _outputEncoder:sub(1, aliveK)
-
-        -- carry over the state of selected k
-        local currState = self.decoder:lastState()
-        local nextState = {}
-        for _, state in ipairs(currState) do
-            local sk = {}
-            for _, s in ipairs(state) do
-                table.insert(sk, s:index(1, expand_k))
-            end
-            table.insert(nextState, sk)
-        end
-        prevState = nextState
+        outputEncoder = self.buffers[1]:sub(1, aliveK)
+        self.buffers[1] = outputEncoder
+        local nextState = self:indexDecoderState(expand_k)
+        self.buffers[2] = nextState
     end
 
 
@@ -282,7 +292,6 @@ function NMT:translate(x, beamSize, numTopWords, maxLength)
 
     return nBest[1], nBestList
 end
-
 
 function NMT:clearState()
     self.encoder:clearState()
