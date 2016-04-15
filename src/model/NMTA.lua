@@ -8,8 +8,6 @@ url: http://www.aclweb.org/anthology/D15-1166
 require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
-local utils = require 'util.utils'
-local bleu = require 'util.BLEU'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -40,42 +38,37 @@ function NMT:__init(kwargs)
     self.layer:add(nn.LogSoftMax())
 
     self.criterion = nn.ClassNLLCriterion()
-    -- TODO: set sizeAverage = false
-    -- this is because the batch size varies during training
-    self.criterion.sizeAverage = false
 
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
     self.maxNorm = kwargs.maxNorm or 5
+
+    -- use buffer to store all the information needed for forward/backward
     self.buffers = {}
 end
 
 
 function NMT:forward(input, target)
-    --[[Forward pass
-    Args:
-        input: a table of {x, y} where x = (batchSize, srcLength) Tensor and
-        y = (batchSize, trgLength) Tensor
-        target: a tensor of (batchSize, trgLength)
-    --]]
-    -- encode pass
-    local outputEncoder = self.encoder:updateOutput(input[1])
-    -- we then initialize the decoder with the last state of the encoder
-    self.decoder:initState(self.encoder:lastState())
-    local outputDecoder = self.decoder:updateOutput(input[2])
-    -- compute the context vector
-    local context = self.glimpse:forward({outputEncoder, outputDecoder})
-    local logProb = self.layer:forward({context, outputDecoder})
+    -- input: a table of tensors
 
-    -- store in buffers
-    self.buffers = {outputEncoder, outputDecoder, context, logProb}
-
+    self:stepEncoder(input[1])
+    local logProb = self:stepDecoder(input[2])
     return self.criterion:forward(logProb, target)
 end
 
 
 function NMT:backward(input, target)
+    -- zero grad manually here
     self.gradParams:zero()
-    local outputEncoder, outputDecoder, context, logProb = unpack(self.buffers)
+
+    -- make it more explicit
+
+    local buffers = self.buffers
+    local outputEncoder = buffers.outputEncoder
+    local outputDecoder = buffers.outputDecoder
+    local context = buffers.context
+    local logProb = buffers.logProb
+
+    -- all good. Ready to backprop
 
     local gradLoss = self.criterion:backward(logProb, target)
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
@@ -117,23 +110,11 @@ function NMT:evaluate()
     self.decoder:evaluate()
 end
 
--- Translation functions ---------------------
-
-function NMT:use_vocab(vocab)
-    self.srcVocab = vocab[1]
-    self.trgVocab = vocab[2]
-    self.id2word = {}
-    for w, id in pairs(self.trgVocab) do
-        self.id2word[id] = w
-    end
-end
-
 
 function NMT:load(fileName)
     local params = torch.load(fileName)
     self.params:copy(params)
 end
-
 
 function NMT:save(fileName)
     torch.save(fileName, self.params)
@@ -144,24 +125,33 @@ end
 function NMT:stepEncoder(x)
     local outputEncoder = self.encoder:updateOutput(x)
     local prevState = self.encoder:lastState()
-    self.buffers = {outputEncoder, prevState}
+    self.buffers = {outputEncoder = outputEncoder, prevState = prevState}
 end
 
 function NMT:stepDecoder(x)
-    -- run the decode one step
-    local outputEncoder, prevState = unpack(self.buffers)
+    -- get out necessary information from the buffers
+    local buffers = self.buffers
+    local outputEncoder, prevState = buffers.outputEncoder, buffers.prevState
+
     self.decoder:initState(prevState)
     local outputDecoder = self.decoder:updateOutput(x)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
-    -- update prevState
-    self.buffers[2] = self.decoder:lastState()
+
+    -- update buffer, adding information needed for backward pass
+    buffers.outputDecoder = outputDecoder
+    buffers.prevState = self.decoder:lastState()
+    buffers.context = context
+    buffers.logProb = logProb
+
     return logProb
 end
 
 function NMT:indexDecoderState(index)
-    -- similar to torch.index function
-    -- return a new state of kept index
+    --[[
+    similar to torch.index function, return a new state of kept index
+    this function is particularly useful for generating translation
+    --]]
     local currState = self.decoder:lastState()
     local newState = {}
     for _, state in ipairs(currState) do
@@ -172,130 +162,12 @@ function NMT:indexDecoderState(index)
         table.insert(newState, sk)
     end
 
+    -- here, it make sense to update the buffer as well
+    local buffers = self.buffers
+    buffers.prevState = newState
+    buffers.outputEncoder = buffers.outputEncoder:index(1, index)
+
     return newState
-end
-
-function NMT:translate(x, beamSize, numTopWords, maxLength, refLine)
-    --[[Translate input sentence with beam search
-    Args:
-        x: source sentence
-        beamSize: size of the beam search
-        we use self.buffers to keep track of outputEncoder and prevState
-    --]]
-
-    local srcVocab, trgVocab = self.srcVocab, self.trgVocab
-    local id2word = self.id2word
-    local idx_GO = trgVocab['<s>']
-    local idx_EOS = trgVocab['</s>']
-
-    -- use this to generate clean sentences from ids
-    local _ignore = {[idx_GO] = true, [idx_EOS] = true}
-
-    -- number of hypotheses kept in the beam
-    local K = beamSize or 10
-    -- number of top words selected from the vocabulary distribution output by the model
-    local Nw = numTopWords or K
-
-    x = utils.encodeString(x, srcVocab, true)
-    local srcLength = x:size(2)
-    local T = maxLength or utils.round(srcLength * 1.4)
-
-    x = x:expand(K, srcLength):typeAs(self.params)
-
-    self:stepEncoder(x)
-
-    local scores = torch.Tensor():typeAs(x):resize(K, 1):zero()
-    local hypothesis = torch.Tensor():typeAs(x):resize(T, K):zero():fill(idx_GO)
-    local completeHyps = {}
-    local aliveK = K
-
-    -- avoid using goto
-    -- handle the first prediction
-    local curIdx = hypothesis[1]:view(-1, 1)
-    local logProb = self:stepDecoder(curIdx)
-    local maxScores, indices = logProb:topk(K, true)  -- should be K not Nw for the first prediction only
-
-    hypothesis[2] = indices[1]
-    scores = maxScores[1]:view(-1, 1)
-
-    for i = 2, T-1 do
-        local curIdx = hypothesis[i]:view(-1, 1)
-        local logProb = self:stepDecoder(curIdx)
-        local maxScores, indices = logProb:topk(Nw, true)
-
-        -- previous scores
-        local curScores = scores:repeatTensor(1, Nw)
-        -- add them to current ones
-        maxScores:add(curScores)
-        local flat = maxScores:view(maxScores:size(1) * maxScores:size(2))
-
-        local nextIndex = {}
-        local expand_k = {}
-        local nextScores = {}
-
-        local nextAliveK = 0
-        for k = 1, aliveK do
-            local logp, index = flat:max(1)
-            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
-            -- make it -INF so we will not select it next time
-            flat[index[1]] = -math.huge
-
-            if yi == idx_EOS then
-                -- complete hypothesis
-                local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
-                completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
-            else
-                table.insert(nextIndex,  yi)
-                table.insert(expand_k, prev_k)
-                table.insert(nextScores, logp[1])
-                nextAliveK = nextAliveK + 1
-            end
-        end
-
-        -- nothing left in the beam to expand
-        aliveK = nextAliveK
-        if aliveK == 0 then break end
-
-
-        expand_k = torch.Tensor(expand_k):long()
-        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
-        -- note: at this point nextHypothesis may contain aliveK hypotheses
-        nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
-        hypothesis = nextHypothesis
-        scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1)
-
-        outputEncoder = self.buffers[1]:sub(1, aliveK)
-        self.buffers[1] = outputEncoder
-        local nextState = self:indexDecoderState(expand_k)
-        self.buffers[2] = nextState
-    end
-
-
-    for k = 1, aliveK do
-        local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
-        completeHyps[cand] = scores[k][1] / (T-1)
-    end
-
-    local nBest = {}
-    for cand in pairs(completeHyps) do nBest[#nBest + 1] = cand end
-    -- sort the result and pick the best one
-    table.sort(nBest, function(c1, c2)
-        return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
-    end)
-
-    -- prepare n-best list for printing
-    local nBestList = {}
-    local bleuScore = ''
-    for rank, hypo in ipairs(nBest) do
-        -- stringx.count is fast
-        local length = stringx.count(hypo, ' ') + 1
-        if refLine then 
-            bleuScore = string.format(' b=%.2f', bleu.score(hypo,refLine)*100)
-        end
-        table.insert(nBestList, string.format('n=%d s=%.4f l=%d%s\t%s',  rank, completeHyps[hypo], length, bleuScore, hypo))
-    end
-
-    return nBest[1], nBestList
 end
 
 function NMT:clearState()

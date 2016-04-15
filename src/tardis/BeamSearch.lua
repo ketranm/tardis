@@ -1,6 +1,6 @@
 -- Beam search
 local utils = require 'util.utils'
-local BLEU = require 'utils.BLEU'
+local BLEU = require 'util.BLEU'
 local BeamSearch = torch.class('BeamSearch')
 
 
@@ -108,11 +108,7 @@ function BeamSearch:search(x, maxLength, ref)
         hypothesis = nextHypothesis
         scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1)
 
-        local buffers = self.model.buffers
-        outputEncoder = buffers[1]:sub(1, aliveK)
-        buffers[1] = outputEncoder
-        local nextState = self.model:indexDecoderState(expand_k)
-        buffers[2] = nextState
+        self.model:indexDecoderState(expand_k)
     end
 
 
