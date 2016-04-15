@@ -48,7 +48,15 @@ end
 
 
 function NMT:forward(input, target)
-    -- input: a table of tensors
+    --[[ Forward pass of NMT
+
+    Parameters:
+    - `input` : table of source and target tensor
+    - `target` : a tensor of next words
+
+    Return:
+    - `logProb` : negative log-likelihood of the minibatch
+    --]]
 
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
@@ -123,12 +131,30 @@ end
 -- useful interface for beam search
 
 function NMT:stepEncoder(x)
+    --[[ Encode the source sequence
+    All the information produced by the encoder is stored in buffers
+    Parameters:
+    - `x` : source tensor, can be a matrix (batch)
+    --]]
+
     local outputEncoder = self.encoder:updateOutput(x)
     local prevState = self.encoder:lastState()
     self.buffers = {outputEncoder = outputEncoder, prevState = prevState}
 end
 
 function NMT:stepDecoder(x)
+    --[[ Run the decoder
+    If it is called for the first time, the decoder will be initialized
+    from the last state of the encoder. Otherwise, it will continue from
+    its last state. This is useful for beam search or reinforce training
+
+    Parameters:
+    - `x` : target sequence, can be a matrix (batch)
+
+    Return:
+    - `logProb` : cross entropy loss of the sequence
+    --]]
+
     -- get out necessary information from the buffers
     local buffers = self.buffers
     local outputEncoder, prevState = buffers.outputEncoder, buffers.prevState
@@ -148,10 +174,16 @@ function NMT:stepDecoder(x)
 end
 
 function NMT:indexDecoderState(index)
-    --[[
-    similar to torch.index function, return a new state of kept index
-    this function is particularly useful for generating translation
+    --[[ This method is useful for beam search.
+    It is similar to torch.index function, return a new state of kept index
+    
+    Parameters:
+    - `index` : torch.LongTensor object
+
+    Return:
+    - `state` : new hidden state of the decoder, indexed by the argument
     --]]
+
     local currState = self.decoder:lastState()
     local newState = {}
     for _, state in ipairs(currState) do
