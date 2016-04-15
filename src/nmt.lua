@@ -118,11 +118,19 @@ else
 
     local file = io.open(kwargs.transFile, 'w')
     local nbestFile = io.open(kwargs.transFile .. '.nbest', 'w')
-
-    local nbLines = 0   
+    -- if reference is provided compute BLEU score of each n-best
+    local refFile
+    if kwargs.refFile then
+        refFile = io.open(kwargs.refFile, 'r')  
+    end
+            
+    local refLine
+    local nbLines = 0 
     for line in io.lines(kwargs.textFile) do
         nbLines = nbLines + 1
-        local translation, nbestList = model:translate(line, kwargs.beamSize, kwargs.numTopWords, kwargs.maxTrgLength)
+        if refFile then refLine = refFile:read() end
+        local translation, nbestList = model:translate(line,
+            kwargs.beamSize, kwargs.numTopWords, kwargs.maxTrgLength, refLine)
         file:write(translation .. '\n')
         file:flush()
         nbestFile:write('SENTID=' .. nbLines .. '\n')

@@ -9,6 +9,7 @@ require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
 local utils = require 'util.utils'
+local bleu = require 'util.BLEU'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -174,7 +175,7 @@ function NMT:indexDecoderState(index)
     return newState
 end
 
-function NMT:translate(x, beamSize, numTopWords, maxLength)
+function NMT:translate(x, beamSize, numTopWords, maxLength, refLine)
     --[[Translate input sentence with beam search
     Args:
         x: source sentence
@@ -284,10 +285,14 @@ function NMT:translate(x, beamSize, numTopWords, maxLength)
 
     -- prepare n-best list for printing
     local nBestList = {}
+    local bleuScore = ''
     for rank, hypo in ipairs(nBest) do
         -- stringx.count is fast
         local length = stringx.count(hypo, ' ') + 1
-        table.insert(nBestList, string.format('n=%d s=%.4f l=%d\t%s',  rank, completeHyps[hypo], length, hypo))
+        if refLine then 
+            bleuScore = string.format(' b=%.2f', bleu.score(hypo,refLine)*100)
+        end
+        table.insert(nBestList, string.format('n=%d s=%.4f l=%d%s\t%s',  rank, completeHyps[hypo], length, bleuScore, hypo))
     end
 
     return nBest[1], nBestList
