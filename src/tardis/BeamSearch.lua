@@ -77,12 +77,11 @@ function BeamSearch:search(x, maxLength, ref)
         local expand_k = {}
         local nextScores = {}
 
+        local logp, index = flat:topk(aliveK, true)
+
         local nextAliveK = 0
         for k = 1, aliveK do
-            local logp, index = flat:max(1)
-            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[1])
-            -- make it -INF so we will not select it next time
-            flat[index[1]] = -math.huge
+            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[k])
 
             if yi == self.idx_EOS then
                 -- complete hypothesis
@@ -91,7 +90,7 @@ function BeamSearch:search(x, maxLength, ref)
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                table.insert(nextScores, logp[1])
+                table.insert(nextScores, logp[k])
                 nextAliveK = nextAliveK + 1
             end
         end
