@@ -28,11 +28,12 @@ function Glimpse:reset(stdv)
 end
 
 function Glimpse:updateOutput(input)
-    --[[
-    Args
-        input: a table {x, y} of two tensors x: (N, Tx, D) Tensor y: (N, Ty, D) Tensor
-        output: context tensor of (N, Ty, D)
-    ]]
+    --[[ Deterministic attention update
+    Parameters
+    - `input` : a table {x, y} of two tensors x: (N, Tx, D) Tensor y: (N, Ty, D) Tensor
+    - `output` : context tensor of (N, Ty, D)
+    --]]
+
     local x, y = input[1], input[2]
     local D = self.input_size
     assert(x:size(1) == y:size(1))

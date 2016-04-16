@@ -61,10 +61,10 @@ function Glimpse:reset(stdv)
 end
 
 function Glimpse:updateOutput(input)
-    --[[
-    Args
-        input: a table {x, y} of two tensors x: (N, Tx, D) Tensor y: (N, Ty, D) Tensor
-        output: context tensor of (N, Ty, D)
+    --[[ Stochastic attention update
+    Parameters
+    - `input` : a table {x, y} of two tensors x: (N, Tx, D) Tensor y: (N, Ty, D) Tensor
+    - `output` : context tensor of (N, Ty, D)
     ]]
     local x, y = input[1], input[2]
     local D = self.input_size
@@ -93,7 +93,7 @@ function Glimpse:updateOutput(input)
     self._sample = self._sample:view(-1)
     local offset = torch.range(0, N-1):view(-1, 1):mul(Tx):repeatTensor(1, Ty):typeAs(self._sample)
     self.sample:resizeAs(self._sample)
-    self.sample:add(self._sample + offset:view(-1))
+    self.sample:add(self._sample, offset:view(-1))
 
     self.output = x:view(-1, D):index(1, self.sample:view(-1)):view(N, Ty, D)
     return self.output
