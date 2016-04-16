@@ -28,14 +28,13 @@ function BeamSearch:use(model)
 end
 
 function BeamSearch:search(x, maxLength, ref)
-    --[[
-    Beam search:
-    - x: source sentence
-    - maxLength: maximum length of the translation
-    - ref: opition, if it is provided, report sentence BLEU score   
-    ]]
+    --[[ Beam search
+    Parameters:
+    - `x` : source sentence
+    - `maxLength` : maximum length of the translation
+    - `ref` : opition, if it is provided, report sentence BLEU score   
+    --]]
 
-    -- use this to generate clean sentences from ids
     local _ignore = self._ignore
     local id2word = self.id2word
     local K, Nw = self.K, self.Nw
@@ -53,7 +52,6 @@ function BeamSearch:search(x, maxLength, ref)
     local completeHyps = {}
     local aliveK = K
 
-    -- avoid using goto
     -- handle the first prediction
     local curIdx = hypothesis[1]:view(-1, 1)
     local logProb = self.model:stepDecoder(curIdx)
@@ -73,11 +71,10 @@ function BeamSearch:search(x, maxLength, ref)
         maxScores:add(curScores)
 
 
-        local score_k, prev_k, idx = utils.topk(aliveK, maxScores, indices)
-        local _eos = torch.Tensor(#idx):typeAs(idx):fill(self.idx_EOS)
+        local score_k, prev_k, idx_k = utils.topk(aliveK, maxScores, indices)
+        local _eos = torch.Tensor(#idx_k):typeAs(idx_k):fill(self.idx_EOS)
 
-        -- check if EOS is generated
-        local mask = idx:eq(_eos)
+        local mask = idx_k:eq(_eos) -- if EOS is generated
         if mask:sum() > 0 then
             local completed_k  = prev_k:maskedSelect(mask)
             for i = 1, completed_k:numel() do
@@ -87,22 +84,21 @@ function BeamSearch:search(x, maxLength, ref)
             end
         end
 
-        mask = idx:ne(_eos) -- words that will be choosen for the next step
+        mask = idx_k:ne(_eos) -- expand
         aliveK = mask:sum()
         if aliveK == 0 then break end
 
-        expand_k = prev_k:maskedSelect(mask)
+        local expand_k = prev_k:maskedSelect(mask)
         scores = score_k:maskedSelect(mask):view(-1, 1)
-        local next_idx = idx:maskedSelect(mask)
+        local next_idx = idx_k:maskedSelect(mask)
 
-        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
+        local nextHypothesis = hypothesis:index(2, expand_k)
         -- note: at this point nextHypothesis may contain aliveK hypotheses
         nextHypothesis[i+1]:copy(next_idx)
         hypothesis = nextHypothesis
 
         self.model:indexDecoderState(expand_k)
     end
-
 
     for k = 1, aliveK do
         local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
