@@ -2,15 +2,23 @@ local THNN = require 'nn.THNN'
 
 --[[
 Hard attention mechanism
-This is an implementation of Bilinear Attention http://www.aclweb.org/anthology/D15-1166
-There is a little difference in the performance of various attention mechanims, 
-the choice of Bilinear attention form is due to it simplicity.
+This is an implementation of Bilinear Attention
+
+Effective Approaches to Attention-based Neural Machine Translation. EMNLP’15
+http://www.aclweb.org/anthology/D15-1166
+
+There is a little difference in the performance of various attention mechanisms, 
+the choice of Bilinear form is due to it simplicity.
 
 After the softmax is computed, instead of weighting average by the softmax output, 
 we choose one location to attend by drawing a sample from multinomial distribution 
 paramatrized by the softmax. 
 This is a form of REINFORCE. For details, see the following paper
-http://arxiv.org/pdf/1502.03044v2.pdf
+
+
+Show, Attend and Tell: Neural Image Caption Generation with Visual Attention
+International Conference for Machine Learning (2015)
+http://arxiv.org/abs/1502.03044
 
 --]]
 local Glimpse, parent = torch.class('nn.Glimpse', 'nn.Module')
