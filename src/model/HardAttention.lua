@@ -4,7 +4,7 @@ local THNN = require 'nn.THNN'
 Hard attention mechanism
 This is an implementation of Bilinear Attention
 
-Effective Approaches to Attention-based Neural Machine Translation. EMNLP’15
+Effective Approaches to Attention-based Neural Machine Translation. EMNLP-15
 http://www.aclweb.org/anthology/D15-1166
 
 There is a little difference in the performance of various attention mechanisms, 
@@ -20,6 +20,15 @@ Show, Attend and Tell: Neural Image Caption Generation with Visual Attention
 International Conference for Machine Learning (2015)
 http://arxiv.org/abs/1502.03044
 
+In this implementation, we do not add Entropy regularization.
+
+IMPORTANT NOTE:
+
+Hard attention exhibits high variance (as it use REINFORCE update rule).
+When training hard attention, it's better to start a few epoch with soft-attention first.
+This will help stabilizing training process.
+
+Author: Ke Tran <m.k.tran@uva.nl>
 --]]
 local Glimpse, parent = torch.class('nn.Glimpse', 'nn.Module')
 
@@ -44,10 +53,10 @@ function Glimpse:__init(input_size)
     self._count = self._count or torch.IntTensor()
 
     self.sample = torch.LongTensor()
-    self.beta = 0
+    self.beta = nil
     self.criterion = nn.ClassNLLCriterion()
     self._sample = torch.LongTensor()
-    self.tau = 0.1
+    self.lambda = 0.1 -- reinforce weight
 end
 
 function Glimpse:reset(stdv)
@@ -126,7 +135,11 @@ function Glimpse:backward(input, gradOutput, reward, scale)
 
     dx:resize(N, Tx, D)
     -- update moving average baseline
-    -- handcoded now, better to move it to option
+    -- hand-coded now, better to move it to option
+    if not self.beta then
+        self.beta =reward:mean() -- initialize the first baseline
+    end
+
     self.beta = 0.9 * self.beta + 0.1 * reward:mean()
 
     -- the reward is the log probability of predicting the next word
@@ -136,8 +149,8 @@ function Glimpse:backward(input, gradOutput, reward, scale)
 
     local _reward = reward:view(-1, 1):repeatTensor(1, Tx)
     local grad_xent = self.criterion:backward(self.log_att, self._sample)
-    
-    grad_xent:cmul(_reward):mul(self.tau)
+
+    grad_xent:cmul(_reward):mul(self.lambda)
 
     -- backprop normally
     local buffer_ax = self.att_buffer
