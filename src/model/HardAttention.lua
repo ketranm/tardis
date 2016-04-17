@@ -50,16 +50,31 @@ function Glimpse:__init(input_size)
 
     -- shit needed for hard attention
     self.shouldScaleGradByFreq = true
-    self._count = self._count or torch.CudaTensor()
-    self._indices = torch.CudaTensor()
-    self._input = torch.CudaTensor()
-    self._sorted = torch.CudaTensor()
 
     self.sample = torch.LongTensor()
     self.beta = nil
     self.criterion = nn.ClassNLLCriterion()
     self._sample = torch.LongTensor()
     self.lambda = 0.001 -- reinforce weight
+end
+
+-- need to double check this
+function Glimpse:type(type, tensorCache)
+    parent.type(self, type, tensorCache)
+
+    if type == 'torch.CudaTensor' then
+        -- CUDA uses _sorted and _indices temporary tensors
+        self._sorted = self.weight.new()
+        self._indices = self.weight.new()
+        self._count = self.weight.new()
+        self._input = self.weight.new()
+    else
+        -- self._count and self._input should only be converted if using Cuda
+        self._count = torch.IntTensor()
+        self._input = torch.LongTensor()
+    end
+
+    return self
 end
 
 function Glimpse:reset(stdv)
