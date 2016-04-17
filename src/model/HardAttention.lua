@@ -25,7 +25,7 @@ In this implementation, we do not add Entropy regularization.
 IMPORTANT NOTE:
 
 Hard attention exhibits high variance (as it use REINFORCE update rule).
-When training hard attention, it's better to start a few epoch with soft-attention first.
+When training hard attention, it's better to start a few epochs with soft-attention first.
 This will help stabilizing training process.
 
 Author: Ke Tran <m.k.tran@uva.nl>
@@ -137,7 +137,7 @@ function Glimpse:backward(input, gradOutput, reward, scale)
     -- update moving average baseline
     -- hand-coded now, better to move it to option
     if not self.beta then
-        self.beta =reward:mean() -- initialize the first baseline
+        self.beta = reward:mean() -- initialize the first baseline
     end
 
     self.beta = 0.9 * self.beta + 0.1 * reward:mean()
