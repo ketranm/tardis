@@ -50,13 +50,16 @@ function Glimpse:__init(input_size)
 
     -- shit needed for hard attention
     self.shouldScaleGradByFreq = true
-    self._count = self._count or torch.IntTensor()
+    self._count = self._count or torch.CudaTensor()
+    self._indices = torch.CudaTensor()
+    self._input = torch.CudaTensor()
+    self._sorted = torch.CudaTensor()
 
     self.sample = torch.LongTensor()
     self.beta = nil
     self.criterion = nn.ClassNLLCriterion()
     self._sample = torch.LongTensor()
-    self.lambda = 0.1 -- reinforce weight
+    self.lambda = 0.001 -- reinforce weight
 end
 
 function Glimpse:reset(stdv)
@@ -109,10 +112,9 @@ function Glimpse:updateOutput(input)
 
 end
 
-function Glimpse:backward(input, gradOutput, reward, scale)
+function Glimpse:backward(input, gradOutput, scale)
     scale = scale or 1.0
-
-    local x, y = input[1], input[2]
+    local x, y, reward = input[1], input[2], input[3]
     local N, Tx, Ty = x:size(1), x:size(2), y:size(2)
     local D = self.input_size  -- for readability
 
