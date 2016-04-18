@@ -53,6 +53,9 @@ function BeamSearch:search(x, maxLength, ref)
     local completeHyps = {}
     local aliveK = K
 
+    -- HACK resampling attention:
+    -- self.model.glimpse:setFlag(true,1)  -- this crap works only if set to 1!!
+
     -- avoid using goto
     -- handle the first prediction
     local curIdx = hypothesis[1]:view(-1, 1)
