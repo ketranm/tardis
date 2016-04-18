@@ -21,7 +21,16 @@ function utils.encodeString(input, vocab, reverse)
 end
 
 function utils.decodeString(x, id2word, _ignore)
-    -- map tensor if indices to surface words
+    --[[ Map tensor if indices to surface words
+
+    Parameters:
+    - `x` : tensor input, 1D for now
+    - `id2word` : mapping dictionary
+    - `_ignore` : dictionary of ignored words such as <s>, </s>
+
+    Return:
+    - `s` : string
+    -]]
     local words = {}
     for i = 1, x:numel() do
         local idx = x[i]
@@ -41,10 +50,11 @@ end
 
 function utils.topk(k, mat, index)
     --[[ find top k elements in the matrix
+
     Parameters:
     - `k` : number of elements
     - `mat` : a matrix
-    - `index: a matrix of LongTensor, same size as mat and store corres
+    - `index: a matrix of LongTensor, same size as mat and store corresponding index
     --]]
     local res, flat_idx = mat:view(-1):topk(k, true)
 
@@ -70,9 +80,15 @@ end
 
 function utils.find_topk(k, mat)
     --[[ find top k elements in the matrix
+
     Parameters:
     - `k` : number of elements
     - `mat` : a matrix
+
+    Return:
+    - `value` : k values
+    - `row` : corresponding row
+    - `col` : corresponding column
     --]]
     local res, idx = mat:view(-1):topk(k, true)
     local dim2 = mat:size(2)
@@ -85,9 +101,11 @@ end
 
 function utils.reverse(t, dim)
     --[[ Reverse tensor with specified dimension
+
     Parameters:
     - `t` : tensor to be reversed
     - `dim` : integer 1 or 2
+
     Return:
     - `rev_t` : reversed tensor
     --]]
@@ -101,7 +119,7 @@ function utils.reverse(t, dim)
         return t:index(1, rev_idx)
     end
 
-    assert(t:dim() == 2)  -- will write code for 1D soon
+    assert(t:dim() == 2)
     if t:size(d) == 1 then return t:clone() end
 
     rev_idx = torch.range(t:size(dim), 1, -1):type(dtype)
