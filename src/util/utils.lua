@@ -104,7 +104,7 @@ function utils.reverse(t, dim)
     assert(t:dim() == 2)  -- will write code for 1D soon
     if t:size(d) == 1 then return t:clone() end
 
-    local rev_idx = torch.range(t:size(dim), 1, -1):type(dtype)
+    rev_idx = torch.range(t:size(dim), 1, -1):type(dtype)
 
     return t:index(dim, rev_idx)
 end
