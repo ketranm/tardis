@@ -24,7 +24,7 @@ else
 end
 
 print('Experiment Setting: ', kwargs)
-
+io:flush()
 
 local model = nn.NMT(kwargs)
 

@@ -33,14 +33,17 @@ function GlimpseDot:updateOutput(input)
     self.att = self.softmax(buffer_att)
 
     -- some hack here
-    if flag then
-        local n = math.floor(self.p * Tx + 1)
+    if self.flag then
+        local n = math.min(math.floor(self.p * Tx + 1), Tx)
         -- sample the shit
         local sample = torch.multinomial(self.att, n)
+	--print('att') print(self.att)
+	--print('sample') print(sample)
         local kept_att = torch.zeros(#self.att):typeAs(self.att):scatter(2, sample, self.att)
         local denom = kept_att:sum(2):repeatTensor(1, Tx):add(1e-12)
         -- overwrite this shit
         self.att = kept_att:cdiv(denom)
+	--print('att_r') print(self.att)
     end
     self.att = self.att:view(N, Ty, Tx)
     self.output:resizeAs(y):bmm(self.att, x)
