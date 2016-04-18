@@ -83,4 +83,31 @@ function utils.find_topk(k, mat)
     return res, row, col
 end
 
+function utils.reverse(t, dim)
+    --[[ Reverse tensor with specified dimension
+    Parameters:
+    - `t` : tensor to be reversed
+    - `dim` : integer 1 or 2
+    Return:
+    - `rev_t` : reversed tensor
+    --]]
+    local dtype = 'torch.LongTensor'
+    if t:type() == 'torch.CudaTensor' then dtype = 'torch.CudaTensor' end
+
+    local rev_idx
+    if not dim then
+        -- this is a 1 D tensor
+        rev_idx = torch.range(t:numel(), 1, -1):type(dtype)
+        return t:index(1, rev_idx)
+    end
+
+    assert(t:dim() == 2)  -- will write code for 1D soon
+    if t:size(d) == 1 then return t:clone() end
+
+    local rev_idx = torch.range(t:size(dim), 1, -1):type(dtype)
+
+    return t:index(dim, rev_idx)
+end
+
+
 return utils
