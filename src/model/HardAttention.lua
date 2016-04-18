@@ -2,19 +2,22 @@ local THNN = require 'nn.THNN'
 
 --[[
 Hard attention mechanism
-This is an implementation of Bilinear Attention
+This is an implementation of Bilinear Attention for computing the softmax.
+
+Detail of Bilinear Attention can be found in:
 
 Effective Approaches to Attention-based Neural Machine Translation. EMNLP-15
 http://www.aclweb.org/anthology/D15-1166
 
 There is a little difference in the performance of various attention mechanisms, 
-the choice of Bilinear form is due to it simplicity.
+the choice of Bilinear form is due to its simplicity.
 
 After the softmax is computed, instead of weighting average by the softmax output, 
 we choose one location to attend by drawing a sample from multinomial distribution 
-paramatrized by the softmax. 
-This is a form of REINFORCE. For details, see the following paper
+paramatrized by the softmax. By sampling from multinomial, we can't take derivative anymore.
+So the update rule has to be slightly different. It has a form of REINFORCE. 
 
+For details, see the following paper:
 
 Show, Attend and Tell: Neural Image Caption Generation with Visual Attention
 International Conference for Machine Learning (2015)
@@ -24,7 +27,7 @@ In this implementation, we do not add Entropy regularization.
 
 IMPORTANT NOTE:
 
-Hard attention exhibits high variance (as it use REINFORCE update rule).
+Hard attention exhibits high variance (as it uses REINFORCE update rule).
 When training hard attention, it's better to start a few epochs with soft-attention first.
 This will help stabilizing training process.
 
