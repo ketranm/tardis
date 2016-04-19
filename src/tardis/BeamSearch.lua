@@ -29,14 +29,15 @@ function BeamSearch:use(model)
     self.dtype = model.params:type()
 end
 
-function BeamSearch:printAttention(att, numTopA, asMatrix)
+function BeamSearch:printAttention(_att, numTopA, asMatrix)
     -- att is a trgLength x srcLength soft attention matrix
     -- topA is the number of top aligned source indices to print for each target index
 
-    --if self.reverseInput then
-    --	 topAtt = reverse(topAtt) -- HOW TO DO THIS ????
-    --end
-
+    local att = _att
+    if self.reverseInput then
+        att = utils.reverse(att, 2)
+    end
+    
     -- create a matrix of binary values than can be easily visualized
     local top,idTop = torch.mul(att,-1):topk(numTopA)
     local topAtt = torch.zeros(#att):typeAs(att):scatter(2, idTop, 1)   
