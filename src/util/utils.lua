@@ -100,7 +100,7 @@ function utils.find_topk(k, mat)
 end
 
 function utils.reverse(t, dim)
-    --[[ Reverse tensor with specified dimension
+    --[[ Reverse tensor along the specified dimension
 
     Parameters:
     - `t` : tensor to be reversed
