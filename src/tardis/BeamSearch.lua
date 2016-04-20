@@ -171,23 +171,29 @@ function BeamSearch:search(x, maxLength, ref)
     table.sort(nBest, function(c1, c2)
         return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
+    
+    return nBest[1], self:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
+end
 
-    -- prepare n-best list for printing
+function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
     local nBestList = {}
-    local msg
+    local info
     for rank, hypo in ipairs(nBest) do
         -- stringx.count is fast
         local length = stringx.count(hypo, ' ') + 1
-	--print(self:printAttention(completeHypsAtt[hypo], 1, true))
+	    --print(self:printAttention(completeHypsAtt[hypo], 1, true))
         local align = self:printAttention(completeHypsAtt[hypo], 1, false)
         if ref then
             local reward = BLEU.score(hypo, ref) * 100  -- rescale for readability
-            msg = string.format('n=%d s=%.4f l=%d b=%.4f\t%s\t%s',  rank, completeHyps[hypo], length, reward, hypo, align)
+            info = string.format('n=%d s=%.4f l=%d b=%.4f\t%s\t%s',  rank, completeHyps[hypo], length, reward, hypo, align)
         else
-            msg = string.format('n=%d s=%.4f l=%d\t%s\t%s',  rank, completeHyps[hypo], length, hypo, align)
+            info = string.format('n=%d s=%.4f l=%d\t%s\t%s',  rank, completeHyps[hypo], length, hypo, align)
         end
-        table.insert(nBestList, msg)
+        table.insert(nBestList, info)
     end
-
-    return nBest[1], nBestList
+    return nBestList
 end
+
+
+
+
