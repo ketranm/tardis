@@ -19,8 +19,9 @@ function BeamSearch:__init(kwargs)
 
     self.K = kwargs.beamSize or 10
     self.Nw = kwargs.numTopWords or self.K
+    self.pTh = kwargs.pruneThreshold or 0
 
-    self.reverseInput = true
+    self.reverseInput = kwargs.reverseInput or true
 end
 
 function BeamSearch:use(model)
@@ -105,6 +106,7 @@ function BeamSearch:search(x, maxLength, ref)
     for i = 2, T-1 do
         local curIdx = hypothesis[i]:view(-1, 1)
         local logProb = self.model:stepDecoder(curIdx)
+        -- local pruning (i.e. keep only Nw best continuations of same prefix) happens here:
         local maxScores, indices = logProb:topk(Nw, true)
         local att = self.model.glimpse:getAttention()
 
@@ -118,11 +120,12 @@ function BeamSearch:search(x, maxLength, ref)
         local expand_k = {}
         local nextScores = {}
 
-        local logp, index = flat:topk(aliveK, true)
+        -- beam pruning (i.e. keep only aliveK hypotheses of length i based on global score) happens here:
+        local maxScoresB, indicesB = flat:topk(aliveK, true)
 
         local nextAliveK = 0
         for k = 1, aliveK do
-            local prev_k, yi = utils.flat_to_rc(maxScores, indices, index[k])
+            local prev_k, yi = utils.flat_to_rc(maxScores, indices, indicesB[k])
 
             if yi == self.idx_EOS then
                 -- complete hypothesis
@@ -132,7 +135,7 @@ function BeamSearch:search(x, maxLength, ref)
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
-                table.insert(nextScores, logp[k])
+                table.insert(nextScores, maxScoresB[k])
                 nextAliveK = nextAliveK + 1
             end
         end
@@ -171,23 +174,29 @@ function BeamSearch:search(x, maxLength, ref)
     table.sort(nBest, function(c1, c2)
         return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
+    
+    return nBest[1], self:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
+end
 
-    -- prepare n-best list for printing
+function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
     local nBestList = {}
-    local msg
+    local info
     for rank, hypo in ipairs(nBest) do
         -- stringx.count is fast
         local length = stringx.count(hypo, ' ') + 1
-	--print(self:printAttention(completeHypsAtt[hypo], 1, true))
+	    --print(self:printAttention(completeHypsAtt[hypo], 1, true))
         local align = self:printAttention(completeHypsAtt[hypo], 1, false)
         if ref then
             local reward = BLEU.score(hypo, ref) * 100  -- rescale for readability
-            msg = string.format('n=%d s=%.4f l=%d b=%.4f\t%s\t%s',  rank, completeHyps[hypo], length, reward, hypo, align)
+            info = string.format('n=%d s=%.4f l=%d b=%.4f\t%s\t%s',  rank, completeHyps[hypo], length, reward, hypo, align)
         else
-            msg = string.format('n=%d s=%.4f l=%d\t%s\t%s',  rank, completeHyps[hypo], length, hypo, align)
+            info = string.format('n=%d s=%.4f l=%d\t%s\t%s',  rank, completeHyps[hypo], length, hypo, align)
         end
-        table.insert(nBestList, msg)
+        table.insert(nBestList, info)
     end
-
-    return nBest[1], nBestList
+    return nBestList
 end
+
+
+
+
