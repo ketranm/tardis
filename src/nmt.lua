@@ -71,7 +71,7 @@ function train()
             end
         end
 
-        if epoch > kwargs.dacayAfter then
+        if epoch > kwargs.decayAfter then
             kwargs.learningRate = kwargs.learningRate * kwargs.decayRate
         end
 
@@ -118,8 +118,8 @@ else
     if kwargs.refFile then
         refFile = io.open(kwargs.refFile, 'r')  
     end
-            
-    -- creat beam search object
+
+    -- create beam search object
     kwargs.srcVocab, kwargs.trgVocab = unpack(loader.vocab)
     local bs = BeamSearch(kwargs)
     bs:use(model)
