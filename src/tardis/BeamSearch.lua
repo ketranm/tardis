@@ -39,7 +39,7 @@ function BeamSearch:printAttention(_att, numTopA, asMatrix)
     end
     
     -- create a matrix of binary values than can be easily visualized
-    local top,idTop = torch.mul(att,-1):topk(numTopA)
+    local top,idTop = att:topk(numTopA,true)
     local topAtt = torch.zeros(#att):typeAs(att):scatter(2, idTop, 1)   
 
     if asMatrix then return topAtt end
