@@ -19,7 +19,7 @@ function BeamSearch:__init(kwargs)
 
     self.K = kwargs.beamSize or 10
     self.Nw = kwargs.numTopWords or self.K
-    self.pTh = kwargs.pruneThreshold or 0
+    self.pTh = kwargs.pruneThreshold or 0   -- example value: -6 (=0.002 in linear space)
 
     self.reverseInput = kwargs.reverseInput or true
 end
@@ -87,6 +87,7 @@ function BeamSearch:search(x, maxLength, ref)
     local attentions = torch.zeros(K, T, srcLength):type(self.dtype)
     local completeHyps = {}
     local completeHypsAtt = {}
+    local numCompleteHyps = 0
     local aliveK = K
 
     -- HACK resampling attention:
@@ -106,9 +107,15 @@ function BeamSearch:search(x, maxLength, ref)
     for i = 2, T-1 do
         local curIdx = hypothesis[i]:view(-1, 1)
         local logProb = self.model:stepDecoder(curIdx)
+        local att = self.model.glimpse:getAttention()
         -- local pruning (i.e. keep only Nw best continuations of same prefix) happens here:
         local maxScores, indices = logProb:topk(Nw, true)
-        local att = self.model.glimpse:getAttention()
+        -- apply threshold pruning to each word set
+        if self.pTh < 0 then
+            local thresholds = maxScores:max(2) + self.pTh
+            maxScores[maxScores:lt(thresholds:expand(#maxScores))] = -math.huge
+            --print('maxScores pruned') print(maxScores)
+        end 
 
         -- previous scores
         local curScores = scores:repeatTensor(1, Nw)
@@ -122,9 +129,13 @@ function BeamSearch:search(x, maxLength, ref)
 
         -- beam pruning (i.e. keep only aliveK hypotheses of length i based on global score) happens here:
         local maxScoresB, indicesB = flat:topk(aliveK, true)
-
+        local thresholdB = flat:max() + self.pTh
+        
         local nextAliveK = 0
         for k = 1, aliveK do
+            -- apply threshold pruning to the set of length-i hypothesis
+            if self.pTh < 0 and maxScoresB[k] < thresholdB then goto continue end
+            
             local prev_k, yi = utils.flat_to_rc(maxScores, indices, indicesB[k])
 
             if yi == self.idx_EOS then
@@ -132,18 +143,19 @@ function BeamSearch:search(x, maxLength, ref)
                 local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
                 completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
                 completeHypsAtt[cand] = attentions[prev_k]:sub(1,(i-1)):clone()
+                numCompleteHyps = numCompleteHyps + 1
             else
                 table.insert(nextIndex,  yi)
                 table.insert(expand_k, prev_k)
                 table.insert(nextScores, maxScoresB[k])
                 nextAliveK = nextAliveK + 1
             end
+            ::continue::
         end
 
         -- nothing left in the beam to expand
         aliveK = nextAliveK
         if aliveK == 0 then break end
-
 
         expand_k = torch.Tensor(expand_k):long()
         local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
@@ -161,12 +173,14 @@ function BeamSearch:search(x, maxLength, ref)
         self.model:indexDecoderState(expand_k)
     end
 
-    -- make sure we complete at least one hypothesis
+    -- add alive but uncompleted hypotheses to the last beam
     for k = 1, aliveK do
         local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
         completeHyps[cand] = scores[k][1] / (T-1)
         completeHypsAtt[cand] = attentions[k]:sub(1,(T-2)):clone() 
+        numCompleteHyps = numCompleteHyps + 1
     end
+    assert(numCompleteHyps>0, "No hypothesis was completed")
 
     local nBest = {}
     for cand in pairs(completeHyps) do nBest[#nBest + 1] = cand end
@@ -196,7 +210,4 @@ function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
     end
     return nBestList
 end
-
-
-
 
