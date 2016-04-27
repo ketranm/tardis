@@ -19,7 +19,7 @@ function BeamSearch:__init(kwargs)
 
     self.K = kwargs.beamSize or 10
     self.Nw = kwargs.numTopWords or self.K
-    self.pTh = kwargs.pruneThreshold or 0   -- example value: -6 (=0.002 in linear space)
+    self.pTh = kwargs.pruneThreshold  -- example value: -6 (math.log(0.002))
 
     self.reverseInput = kwargs.reverseInput or true
 end
@@ -60,6 +60,21 @@ function BeamSearch:printAttention(_att, numTopA, asMatrix)
     return str
 end
 
+-- TODO: move the following to utils
+function BeamSearch:groupIdenticalRows(matrix)
+    local bins = {}
+    for i = 1, matrix:size(1) do
+        --local rowNum = tonumber(table.concat(matrix[i]:totable(), ''), 2) -- this can only work for binary matrices
+        local rowStr = table.concat(matrix[i]:totable(), '_')
+        if bins[rowStr] then
+            table.insert(bins[rowStr], i)
+        else
+            bins[rowStr] = {i}
+        end
+    end
+    return bins
+end
+
 function BeamSearch:search(x, maxLength, ref)
     --[[
     Beam search:
@@ -67,10 +82,8 @@ function BeamSearch:search(x, maxLength, ref)
     - maxLength: maximum length of the translation
     - ref: opition, if it is provided, report sentence BLEU score   
     ]]
+    self.useSrcCoverageBins = false
 
-    -- use this to generate clean sentences from ids
-    local _ignore = self._ignore
-    local id2word = self.id2word
     local K, Nw = self.K, self.Nw
 
     x = utils.encodeString(x, self.srcVocab, self.reverseInput)
@@ -82,100 +95,115 @@ function BeamSearch:search(x, maxLength, ref)
     self.model:stepEncoder(x)
 
     local scores = torch.zeros(K, 1):type(self.dtype)
-    local hypothesis = torch.zeros(T, K):fill(self.idx_GO):type(self.dtype)
-    -- store attention distribution a each time step:
+    local hypotheses = torch.zeros(T, K):fill(self.idx_GO):type(self.dtype)
+    -- for each alive hypo, store attention distribution a each time step:
     local attentions = torch.zeros(K, T, srcLength):type(self.dtype)
+    -- for each alive hypo, store "source coverage" vector:
+    local srcCoverages = torch.zeros(K, srcLength):type(self.dtype)
     local completeHyps = {}
     local completeHypsAtt = {}
     local numCompleteHyps = 0
-    local aliveK = K
 
     -- HACK resampling attention:
     -- self.model.glimpse:setFlag(true,1)  -- this crap works only if set to 1!!
     
     -- avoid using goto
     -- handle the first prediction
-    local curIdx = hypothesis[1]:view(-1, 1)
+    local curIdx = hypotheses[1]:view(-1, 1)
     local logProb = self.model:stepDecoder(curIdx)
     local maxScores, indices = logProb:topk(K, true)  -- should be K not Nw for the first prediction only
     local att = self.model.glimpse:getAttention()
-    
-    hypothesis[2] = indices[1]
+    local _,topAttIds = att:squeeze():max(2)
+
+    hypotheses[2] = indices[1]
     attentions[{ {},1 }] = att
+    srcCoverages:scatter(2, topAttIds, 1)
     scores = maxScores[1]:view(-1, 1)
    
     for i = 2, T-1 do
-        local curIdx = hypothesis[i]:view(-1, 1)
+        ---print('#### i=' .. i)
+        local curIdx = hypotheses[i]:view(-1, 1)
         local logProb = self.model:stepDecoder(curIdx)
         local att = self.model.glimpse:getAttention()
+        attentions[{ {},i }] = att
+        local _,topAttIds = att:squeeze(2):max(2)
+        srcCoverages:scatter(2, topAttIds, 1)
+        --print('srcCoverages') print(srcCoverages)
+        local srcCoverageBins
+        if self.useSrcCoverageBins then
+            -- group hypotheses that have same src coverage vector
+            srcCoverageBins = self:groupIdenticalRows(srcCoverages)
+            ---print('srcCoverageBins') print(srcCoverageBins)
+        end
+        
         -- local pruning (i.e. keep only Nw best continuations of same prefix) happens here:
         local maxScores, indices = logProb:topk(Nw, true)
         -- apply threshold pruning to each word set
-        if self.pTh < 0 then
+        if self.pTh then
             local thresholds = maxScores:max(2) + self.pTh
             maxScores[maxScores:lt(thresholds:expand(#maxScores))] = -math.huge
-            --print('maxScores pruned') print(maxScores)
         end 
 
         -- previous scores
         local curScores = scores:repeatTensor(1, Nw)
         -- add them to current ones
         maxScores:add(curScores)
-        local flat = maxScores:view(-1)
 
+        ---print('maxScores') print(maxScores)
+        ---print('indices') print(indices)
+                
         local nextIndex = {}
         local expand_k = {}
         local nextScores = {}
+        local completeHypoIds = {}
 
-        -- beam pruning (i.e. keep only aliveK hypotheses of length i based on global score) happens here:
-        local maxScoresB, indicesB = flat:topk(aliveK, true)
-        local thresholdB = flat:max() + self.pTh
-        
-        local nextAliveK = 0
-        for k = 1, aliveK do
-            -- apply threshold pruning to the set of length-i hypothesis
-            if self.pTh < 0 and maxScoresB[k] < thresholdB then goto continue end
-            
-            local prev_k, yi = utils.flat_to_rc(maxScores, indices, indicesB[k])
-
-            if yi == self.idx_EOS then
-                -- complete hypothesis
-                local cand = utils.decodeString(hypothesis[{{}, prev_k}], id2word, _ignore)
-                completeHyps[cand] = scores[prev_k][1]/i -- normalize by sentence length
-                completeHypsAtt[cand] = attentions[prev_k]:sub(1,(i-1)):clone()
-                numCompleteHyps = numCompleteHyps + 1
-            else
-                table.insert(nextIndex,  yi)
-                table.insert(expand_k, prev_k)
-                table.insert(nextScores, maxScoresB[k])
-                nextAliveK = nextAliveK + 1
+        if(self.useSrcCoverageBins) then
+            -- TODO: call pruneHypos for each different srcCoverage vector
+            local maxScoresBin, indicesBin
+            for b, ids in pairs(srcCoverageBins) do
+                ---print(b, ids)
+                maxScoresBin = maxScores:index(1,torch.LongTensor(ids))
+                indicesBin = indices:index(1,torch.LongTensor(ids))
+                ---print('maxScoresBin') print(maxScoresBin)
+                ---print('indicesBin') print(indicesBin)
+                self:pruneHypos(maxScoresBin, indicesBin, K, nextIndex, expand_k, nextScores, completeHypoIds)                
             end
-            ::continue::
+        else
+            self:pruneHypos(maxScores, indices, K, nextIndex, expand_k, nextScores, completeHypoIds)
+        end
+        ---print(nextIndex) print('nextIndex')
+        ---print(expand_k) print('expand_k')
+
+        for j = 1, #completeHypoIds do
+            local id = completeHypoIds[j]
+            local cand = utils.decodeString(hypotheses[{{}, id}], self.id2word, self._ignore)
+            completeHyps[cand] = scores[id][1]/i -- normalize by sentence length
+            completeHypsAtt[cand] = attentions[id]:sub(1,(i-1)):clone()
+            numCompleteHyps = numCompleteHyps + 1
+            -- for each EOS that is selected, reduce beam-width by one [Cho & al.2014]
+            K = K - 1
         end
 
         -- nothing left in the beam to expand
-        aliveK = nextAliveK
-        if aliveK == 0 then break end
+        if #nextIndex < 1 or K < 1 then break end
 
         expand_k = torch.Tensor(expand_k):long()
-        local nextHypothesis = hypothesis:index(2, expand_k)  -- remember to convert to cuda
-        -- note: at this point nextHypothesis may contain aliveK hypotheses
-        nextHypothesis[i+1]:copy(torch.Tensor(nextIndex))
-        hypothesis = nextHypothesis
+        local nextHypotheses = hypotheses:index(2, expand_k)  -- remember to convert to cuda
+        -- note: at this point nextHypotheses may contain K hypotheses
+        nextHypotheses[i+1]:copy(torch.Tensor(nextIndex))
+        hypotheses = nextHypotheses
 
-        attentions[{ {},i }] = att
         attentions = attentions:index(1, expand_k)
+        srcCoverages = srcCoverages:index(1, expand_k)     
 
-        --print('nextHypothesis') print(nextHypothesis)   
-        --print('nextAttentions') print(attentions)        
-        
         scores = torch.Tensor(nextScores):typeAs(x):view(-1, 1)
         self.model:indexDecoderState(expand_k)
     end
 
     -- add alive but uncompleted hypotheses to the last beam
-    for k = 1, aliveK do
-        local cand = utils.decodeString(hypothesis[{{}, k}], id2word, _ignore)
+    local numLastHypos = math.min(K, hypotheses:size(2))
+    for k = 1, numLastHypos do
+        local cand = utils.decodeString(hypotheses[{{}, k}], self.id2word, self._ignore)
         completeHyps[cand] = scores[k][1] / (T-1)
         completeHypsAtt[cand] = attentions[k]:sub(1,(T-2)):clone() 
         numCompleteHyps = numCompleteHyps + 1
@@ -188,9 +216,39 @@ function BeamSearch:search(x, maxLength, ref)
     table.sort(nBest, function(c1, c2)
         return completeHyps[c1] > completeHyps[c2] or completeHyps[c1] > completeHyps[c2] and c1 > c2
     end)
-    
+
     return nBest[1], self:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
 end
+
+
+function BeamSearch:pruneHypos(expandScores, expandIndices, K, nextIndex, expand_k, nextScores, completeHypoIds)
+    local flat = expandScores:view(-1)
+    if K > flat:size(1) then K = flat:size(1) end
+    ---print('flat') print(flat)
+    ---print('top '..K)
+    -- beam pruning (i.e. keep only aliveK hypotheses of length i based on global score):
+    local maxScoresB, indicesB = flat:topk(K, true)
+    local thresholdB
+    if self.pTh then thresholdB = flat:max() + self.pTh end
+    
+    for k = 1, K do
+        -- apply threshold pruning to the set of length-i hypotheses
+        if self.pTh and maxScoresB[k] < thresholdB then goto continue end
+        
+        local prev_k, yi = utils.flat_to_rc(expandScores, expandIndices, indicesB[k])
+
+        if yi == self.idx_EOS then
+            -- complete hypothesis
+            table.insert(completeHypoIds,prev_k)
+        else
+            table.insert(nextIndex,  yi)
+            table.insert(expand_k, prev_k)
+            table.insert(nextScores, maxScoresB[k])
+        end
+        ::continue::
+    end
+end
+
 
 function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
     local nBestList = {}
