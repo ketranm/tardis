@@ -56,24 +56,82 @@ local function checksum(state)
 end
 
 
-function PolicySearch:greedyRollin(input, length)
-    -- roll-in with learned policy
+function PolicySearch:greedyRollin(input, length, prevState)
+    --[[ roll-in with learned policy
+    Parameters:
+    - `input` : starting symbol
+    - `length`: roll-in step
+    - `prevState` : previous state before roll in
+
+    Return:
+    - `trajectory` : the greedy trajectory
+    --]]
     local model = self.model
+    model.buffers.prevState = prevState
     local trajectory = input:repeatTensor(length, 1)
     local x, logp = input, nil
     local cost = nil
 
-    local is_done = false
     for t = 1, length do
         logp = model:stepDecoder(x)
         cost, x = logp:max(2) -- greedy
         trajectory[t] = x
     end
-    return trajectory
+
+    local prevState = copyState(model.buffers.prevState)
+    local logProb = model.buffers.logProb
+    return trajectory, prevState, logProb
+end
+
+-- TODO: roll-out with reference policy
+function PolicySearch:greedyRollout(input, length, prevState)
+    --[[ roll-out with learned policy
+    We collect sample for experience replay
+    Parameters:
+    - `input` : starting symbol
+    - `length`: roll-in step
+    - `prevState` : previous state before roll in
+
+    Return:
+    - `trajectory` : the greedy trajectory
+    --]]
+
+    local examples = {}
+
+    local model = self.model
+    model.buffers.prevState = prevState
+
+    local trajectory = input:repeatTensor(length, 1)
+    local x, logp = input, nil
+    local cost = nil
+
+    local s = nil -- state before taking an action
+    local s2 = nil -- state after taking an action
+
+
+    for t = 1, length do
+        local D = {}
+        s = model:selectState()
+
+        logp = model:stepDecoder(x)
+        s2 = model:selectState()
+        local a = x:clone()
+        cost, x = logp:max(2) -- greedy
+        local _, a2 = logp:view(-1):topk(5, true)
+        table.insert(examples, {s, a, s2, a2})
+        trajectory[t] = x
+    end
+
+    local prevState = copyState(model.buffers.prevState)
+    local logProb = model.buffers.logProb
+    return trajectory, examples
 end
 
 
 function PolicySearch:search(x, maxLength, ref)
+
+    -- refer to the model
+    local model = self.model
 
     local _ignore = self._ignore
     local id2word = self.id2word
@@ -95,43 +153,44 @@ function PolicySearch:search(x, maxLength, ref)
     local refReward = BLEU.rewardT(y, y)
     x = x:type(self.dtype)
 
-    self.model:stepEncoder(x)
+    model:stepEncoder(x)
+    local encodeState = copyState(model.buffers.prevState)
 
     K = 5  -- hand-code for now
     local score = 0
     local hypothesis = torch.zeros(T, 1):fill(self.idx_GO):type(self.dtype)
 
-    -- handle the first prediction
-    local curIdx = hypothesis[1]:view(-1, 1)
-    local goIdx = curIdx:clone()
-
-    local buffer = {}
-    for i = 1, T - 1 do
-        local curIdx = hypothesis[i]:view(-1, 1)
-        local logProb = self.model:stepDecoder(curIdx)
-
-        local s = self.model:selectState()
-        _score, idx = logProb:view(-1):max(1)
-
-        -- this is cheap
-        -- take out next possible actions according to the model
-        local _, possible_idx = logProb:view(-1):topk(K)
-        local state_action = {s:clone(), idx, possible_idx}
-        table.insert(buffer, state_action)
-        score = score + _score[1]
-        hypothesis[i+1] = idx
-    end
+    local goIdx = hypothesis[1]:view(1, 1):clone()
 
     local stateQ = {}
-    local r = BLEU.rewardT(hypothesis:view(-1)[{{2,T}}], y)
-    local prev_r = 0
-    for i = 1, #buffer-1 do
-        -- ignore the first prediction, do add it if shit works
-        local s , a = buffer[i][1], buffer[i][2]
-        local s2, a2 = buffer[i + 1][1], buffer[i + 1][3]
-        local ri = r[i] - prev_r
-        prev_r = r[i]
-        table.insert(stateQ, {s, a, s2, a2, ri})
+
+    for t = 1, T  do
+        for myT = 2, T - 1 do
+            model.buffers.prevState = encodeState
+            if t == myT then
+                -- roll-in with learned policy
+                local trajectory, prevState, logProb = self:greedyRollin(goIdx, myT, encodeState)
+                -- rolling out
+                local _, idx = logProb:topk(K, true)
+                idx = idx:view(-1, 1)
+                hypothesis[{{1, myT}, {}}] = trajectory
+                for k = 1, K do
+                    --print(myT, k, checksum(prevState))
+                    hypothesis[myT] = idx[k]
+                    local trj, D = self:greedyRollout(idx[k]:view(1, 1), T-myT, prevState)
+                    hypothesis[{{myT +1, T}, {}}] = trj
+                    --print(#D, T-myT)
+                    local r = BLEU.rewardT(hypothesis:view(-1), y)
+                    for i = myT, T-1 do
+                        -- we do not take the last action
+                        local Dx = D[i - myT + 1]
+                        table.insert(Dx, r[i])
+                        table.insert(stateQ, Dx)
+                    end
+                end
+                -- now we should do some optimization to speed up this roll-in, roll-out
+            end
+        end
     end
 
     return stateQ
