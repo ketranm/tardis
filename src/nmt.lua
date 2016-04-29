@@ -132,9 +132,11 @@ else
         local translation, nbestList = bs:search(line, kwargs.maxTrgLength, refLine)
         file:write(translation .. '\n')
         file:flush()
-        nbestFile:write('SENTID=' .. nbLines .. '\n')
-        nbestFile:write(table.concat(nbestList, '\n') .. '\n')
-        nbestFile:flush()
+        if nbestList then
+            nbestFile:write('SENTID=' .. nbLines .. '\n')
+            nbestFile:write(table.concat(nbestList, '\n') .. '\n')
+            nbestFile:flush()
+        end
     end
     file:close()
     nbestFile:close()
