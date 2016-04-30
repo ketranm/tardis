@@ -4,7 +4,10 @@ Reference:
 How (not) to Train your Generative Model: Scheduled Sampling, Likelihood, Adversary?
 Ferenc Huszár (2015)
 url: http://arxiv.org/pdf/1511.05101v1.pdf
+
+NOTE: this objective doesn't work. Should delete it in the release
 --]]
+
 local JSDCriterion, parent = torch.class('nn.JSDCriterion', 'nn.Criterion')
 
 function JSDCriterion:__init(sizeAverage)
