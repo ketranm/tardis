@@ -8,40 +8,28 @@ In Proceedings of NAACL 2015
 
 local layer, parent = torch.class('nn.Memory', 'nn.Module')
 
-function layer:__init(memorySize)
+function layer:__init(memorySize, memInp, memOut, posMat)
     parent.__init(self)
 
     self.memorySize = memorySize
     self.output = torch.Tensor()
 
-    self.gradInput = {torch.Tensor(), torch.Tensor(), torch.Tensor()}
+    self.gradInput = {torch.Tensor(), torch.Tensor()}
     self.softmax = nn.SoftMax()
+    -- assigning memory lookup table
+    self.posMat = posMat
+    self.memInp = memInp
+    self.memOut = memOut
 
+    self.time = torch.range(1, self.memorySize)
     -- temporary tensors
     self.ht = torch.Tensor()  -- copy of h transpose
     self.attScore3Dims = torch.Tensor()
 
     self.attProb3Dims = torch.Tensor()
     self.gradAttProb = torch.Tensor()
-end
 
-
-function layer:__sliceOld(mem)
-    --[[ Slicing memory `mem`
-    In this simple implementation, we follow Tran et al
-    TODO: use repeated input to get nicer gradient from lookup table
-    That is if the input indices is 1 2 3 4 5 and memorySize = 3
-    we present the input sequence 1 2 3 2 3 4 3 4 5 to the lookup table
-    nn.LookupTable will normalize gradient by the count frequency, thus gradient will be nicer
-    --]]
-    local T = mem:size(2)
-    assert(T > self.memorySize, 'sequence length should be longer than the memory size!')
-    local slice = {}
-    for t = 0, T - self.memorySize do
-        local m = mem[{{},{t + 1, t + self.memorySize}, {}}]
-        table.insert(slice, m)
-    end
-    return slice
+    self.cache = {}
 end
 
 function layer:__slice(mem)
@@ -64,14 +52,26 @@ function layer:__slice(mem)
 end
 
 function layer:updateOutput(input)
-    local memIn, memOut, h = unpack(input)
+    local x, h = unpack(input)
     local N, T, D = h:size(1), h:size(2), h:size(3)
     local Mx = self.memorySize
 
+    local mem_inp = self.memInp:forward(x)
+    local mem_out = self.memOut:forward(x)
+
+    local time_b = self.time:repeatTensor(N, T)  -- (N, T * Mx)
+
+    local pos_mat = self.posMat:forward(time_b)  -- positional bias
+
+    -- we reuse mem_inp
+    mem_inp:add(pos_mat)  -- inject bias
+
+    self.cache = {pos_mat, time_b}
+
     -- this will be a table of T 3D tensors
     -- each of them has size N, Mx, D, where Mx <= self.memorySize
-    self.slicedMemIn = self:__slice(memIn)
-    self.slicedMemOut = self:__slice(memOut)
+    self.slicedMemInp = self:__slice(mem_inp)
+    self.slicedMemOut = self:__slice(mem_out)
 
 
     self.ht = h:transpose(2, 3)  -- (N, D, T)
@@ -80,10 +80,11 @@ function layer:updateOutput(input)
 
     for t = 1, T do
         local htt = self.ht[{{}, {}, {t}}]  -- (N, D, 1) tensor
-        local memIn_t = self.slicedMemIn[t]
+        local mem_inp_t = self.slicedMemInp[t]
 
-        self.attScore3Dims[{{}, {(t-1) * Mx + 1, t * Mx}, {}}]:bmm(memIn_t, htt)
+        self.attScore3Dims[{{}, {(t-1) * Mx + 1, t * Mx}, {}}]:bmm(mem_inp_t, htt)
     end
+
 
     self.attScore2Dims = self.attScore3Dims:view(-1, Mx)  -- (N * T, Mx)
 
@@ -102,17 +103,16 @@ end
 
 
 function layer:backward(input, gradOutput)
-    local memIn, memOut, h = unpack(input)
+    local x, h = unpack(input)
     local N, T, D = h:size(1), h:size(2), h:size(3)
     local Mx = self.memorySize
 
-    local gradMemIn, gradMemOut, grad_h = unpack(self.gradInput)
-    gradMemIn:resizeAs(memIn):zero()
-    gradMemOut:resizeAs(memOut):zero()
+    local grad_h = self.gradInput[2]
     grad_h:resizeAs(h):zero()
 
-    -- each element of the slice is a (N, Mx, D) tensor
-    local slicedGradMemIn = self:__slice(gradMemIn)
+    -- First, we use pos_mat to store grad mem_out
+    local pos_mat, time_b = unpack(self.cache)
+    local gradMemOut = pos_mat
     local slicedGradMemOut = self:__slice(gradMemOut)
 
 
@@ -126,19 +126,34 @@ function layer:backward(input, gradOutput)
         self.gradAttProb[{{}, {t}, {}}]:bmm(dout_t, self.slicedMemOut[t]:transpose(2, 3))  -- (N, 1, Mx)
     end
 
+    -- back propagate memOut
+
+    self.memOut:backward(x, gradMemOut)
+
+    -- keep working
     self.gradAttProb = self.gradAttProb:view(-1, Mx)  -- (N * T, Mx)
 
     local gradAttScore = self.softmax:backward(self.attScore2Dims, self.gradAttProb)
 
     gradAttScore = gradAttScore:view(N, -1 , 1)  -- (N, T * Mx, 1)
 
+    -- we are done with memory output, reuse gradMemOut
+    local gradMemInp = pos_mat
+
+    local slicedGradMemInp = self:__slice(gradMemInp)
+
     for t = 1, T do
         local ht = h[{{}, {t}, {}}] -- (N, 1, D)
         -- get out grad of the unnormalized attention
         local grad_attn_t = gradAttScore[{{},{(t-1) * Mx + 1, t * Mx}, {}}]  -- (N, Mx, 1)
-        grad_h[{{}, {t}, {}}]:bmm(grad_attn_t:transpose(2, 3), self.slicedMemIn[t])
-        slicedGradMemIn[t]:bmm(grad_attn_t, ht)
+        grad_h[{{}, {t}, {}}]:bmm(grad_attn_t:transpose(2, 3), self.slicedMemInp[t])
+        slicedGradMemInp[t]:bmm(grad_attn_t, ht)
     end
+
+    -- sweet, we can backpropagate memInp
+    self.memInp:backward(x, gradMemInp)
+    -- now we can backpropage position matrix
+    self.posMat:backward(time_b, gradMemInp)
 
     return self.gradInput
 end
@@ -151,6 +166,7 @@ function layer:clearState()
         'ht',
         'attScore3Dims',
         'attProb3Dims',
-        'gradAttProb'
+        'gradAttProb',
+        'attScore2Dims'
     })
 end
