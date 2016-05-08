@@ -19,7 +19,7 @@ end
 function ReinforceSampler:updateOutput(input)
     --[[ Sampling
     Parameters:
-    - `input` : 1D Tensor of log-probability
+    - `input` :  tensor (batchSize, vocabSize) of log-probability
     Returns:
     - `output` : sample generated from this log-prob
 
