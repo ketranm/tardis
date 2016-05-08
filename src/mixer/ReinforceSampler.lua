@@ -1,9 +1,13 @@
 --[[ Sampling from Categorical distribution
 This class is useful for REINFORCE criterion
 
-TODO: rename to MultinomilaSampler
---]]
+TODO: rename to MultinomialSampler
 
+NOTE: current implementation only works on GPU.
+For CPU mode, self.output need to be 'torch.LongTensor' type
+
+--]]
+require 'torch'
 local ReinforceSampler, parent = torch.class('nn.ReinforceSampler', 'nn.Module')
 
 function ReinforceSampler:__init()
@@ -24,7 +28,7 @@ function ReinforceSampler:updateOutput(input)
     self.prob:copy(input)
     self.prob:exp()
     self.output:resize(input:size(1), 1)
-    torch.multinomial(self.output, self.prob, 1)
+    self.prob.multinomial(self.output, self.prob, 1)
     return self.output
 end
 
