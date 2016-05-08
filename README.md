@@ -5,9 +5,6 @@ Yes, it is the [TARDIS](https://en.wikipedia.org/wiki/TARDIS) from Dr. Who.
 
 Did I mention the TARDIS looks like a BLEU telephone box. Oops, I meant blue telephone box.
 
-
-A Neural Machine Translation (NMT) system developed at ILPS, University of Amsterdam.
-
 ## Features
 
 - Standard Seq2seq model (we won't update this for now)
@@ -20,8 +17,9 @@ A Neural Machine Translation (NMT) system developed at ILPS, University of Amste
 - Recurrent Memory Networks (in progress)
 - Character LSMT models
 - REINFORCE training NMT (in progress)
+- Efficient padding/bucketting sentences to speed up training
 
-## Contribution
+## Contributors
 
 - Ke Tran
 - Arianna Bisazza
