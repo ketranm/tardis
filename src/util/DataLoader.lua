@@ -5,39 +5,40 @@ require 'torch'
 local DataLoader = torch.class('DataLoader')
 local _ = require 'moses'
 
-function DataLoader:__init(kwargs)
+function DataLoader:__init(config)
     self._GO = "<s>"
     self._EOS = "</s>"
     self._UNK = "<unk>"
-    self._START_VOCAB = {self._GO, self._EOS, self._UNK}
-    
-    local langs = {kwargs.src, kwargs.trg}
+    self._PAD = '<pad>'
+    self._START_VOCAB = {self._GO, self._EOS, self._UNK, self._PAD}
+
+    local langs = {config.src, config.trg}
 
     -- data path
 
     local trainFiles = _.map(langs, function(i, ext)
-        return path.join(kwargs.dataDir, string.format("%s.%s", kwargs.trainPrefix, ext))
+        return path.join(config.dataDir, string.format("%s.%s", config.trainPrefix, ext))
     end)
 
     local validFiles = _.map(langs, function(i, ext)
-        return path.join(kwargs.dataDir, string.format("%s.%s", kwargs.validPrefix, ext))
+        return path.join(config.dataDir, string.format("%s.%s", config.validPrefix, ext))
     end)
 
     -- helper
-    local vocabFile = path.join(kwargs.dataDir, 'vocab.t7')
-    -- auxilary file to store additional infomation about chunks
-    local indexFile = path.join(kwargs.dataDir, 'index.t7')
+    local vocabFile = path.join(config.dataDir, 'vocab.t7')
+    -- auxiliary file to store additional information about chunks
+    local indexFile = path.join(config.dataDir, 'index.t7')
 
-    self.srcVocabSize = kwargs.srcVocabSize
-    self.trgVocabSize = kwargs.trgVocabSize
-    self.batchSize = kwargs.batchSize
+    self.srcVocabSize = config.srcVocabSize
+    self.trgVocabSize = config.trgVocabSize
+    self.batchSize = config.batchSize
 
     self.vocab = {}
     self.tracker = {train = {tensorFiles = {}, nBatch = 0},
                     valid = {tensorFiles = {}, nBatch = 0}}
-    
-    local trainPrefix = path.join(kwargs.dataDir, kwargs.trainPrefix)
-    local validPrefix = path.join(kwargs.dataDir, kwargs.validPrefix)
+
+    local trainPrefix = path.join(config.dataDir, config.trainPrefix)
+    local validPrefix = path.join(config.dataDir, config.validPrefix)
 
     if not path.exists(vocabFile) then
         print('run pre-processing, one-time setup!')
@@ -49,9 +50,13 @@ function DataLoader:__init(kwargs)
         torch.save(vocabFile, self.vocab)
 
         print('create training tensor files...')
-        self:text2Tensor(trainFiles, trainPrefix, kwargs.chunkSize, self.tracker["train"])
+        self:text2Tensor(trainFiles, trainPrefix,
+            config.chunkSize, self.tracker["train"])
+
         print('create validation tensor files...')
-        self:text2Tensor(validFiles, validPrefix, kwargs.chunkSize, self.tracker["valid"])
+        self:text2Tensor(validFiles, validPrefix,
+            config.chunkSize, self.tracker["valid"])
+
         torch.save(indexFile, self.tracker)
     else
         self.vocab = torch.load(vocabFile)
@@ -106,7 +111,9 @@ function DataLoader:makeVocab(textFile, vocabSize)
     local wordFreq = {}
     print('reading in ' .. textFile)
     for line in io.lines(textFile) do
-        for w in line:gmatch("%S+") do wordFreq[w] = (wordFreq[w] or 0) + 1 end
+        for w in line:gmatch("%S+") do
+            wordFreq[w] = (wordFreq[w] or 0) + 1
+        end
     end
 
     local words = {}
@@ -116,7 +123,8 @@ function DataLoader:makeVocab(textFile, vocabSize)
 
     -- sort by frequency
     table.sort(words, function(w1, w2)
-        return wordFreq[w1] > wordFreq[w2] or wordFreq[w1] == wordFreq[w2] and w1 < w2
+        return wordFreq[w1] > wordFreq[w2] or
+            wordFreq[w1] == wordFreq[w2] and w1 < w2
     end)
 
     local wordIdx = {}
@@ -171,13 +179,15 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
     local buckets = {}
     local nBatch = 0
 
+    local diff = 5 -- maximum different in length of the target
+
     for source, target in seq.zip(unpack(files)) do
         count = count + 1
 
         local srcTokens = stringx.split(source)
         local trgTokens = stringx.split(target)
-
-        local _bucketId = string.format("%d|%d", #srcTokens, #trgTokens)
+        local trgLength = #trgTokens + diff - (#trgTokens % diff)
+        local _bucketId =  string.format('%d|%d', #srcTokens, trgLength)
 
         local tokenIdx, token
         -- reverse the source sentence
@@ -195,6 +205,10 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
             table.insert(trgIds, tokenIdx)
         end
         table.insert(trgIds, trgVocab[self._EOS])
+        -- add PAD to the end after <EOS>
+        for i = 1, trgLength - #trgTokens do
+            table.insert(trgIds, trgVocab[self._PAD])
+        end
 
         -- put sentence pairs to corresponding bucket
         buckets[_bucketId] = buckets[_bucketId] or {source = {}, target = {}}
@@ -204,7 +218,7 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
 
         if count % chunkSize == 0 then
             chunkIdx = chunkIdx + 1
-            
+
             local tensorFile = tensorPrefix .. chunkIdx .. '.t7'
             table.insert(tracker.tensorFiles, tensorFile)
             tracker.nBatch = tracker.nBatch + self:_createChunk(buckets, tensorFile)
@@ -213,7 +227,7 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
     end
     if count % chunkSize  > 1 then
         -- process the remaining
-        chunkIdx = chunkIdx + 1  
+        chunkIdx = chunkIdx + 1
         local tensorFile = tensorPrefix .. chunkIdx .. '.t7'
         table.insert(tracker.tensorFiles, tensorFile)
         tracker.nBatch = tracker.nBatch + self:_createChunk(buckets, tensorFile)
