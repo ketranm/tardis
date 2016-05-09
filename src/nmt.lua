@@ -26,13 +26,19 @@ end
 print('Experiment Setting: ', config)
 io:flush()
 
+
+local loader = DataLoader(config)
+
+config.padidx = loader.padidx
+
 local model = nn.NMT(config)
+-- overwrite config
 
 if config.gpuid >= 0 then
     model:cuda()
 end
 
-local loader = DataLoader(config)
+
 
 -- prepare data
 function prepro(batch)
@@ -53,18 +59,18 @@ end
 function train()
     local exp = math.exp
     for epoch = 1,config.maxEpoch do
-        loader:read("train")
+        loader:read_train()
         model:training()
         local nll = 0
-        local nBatch = loader:nBatch()
-        print('number of batches: ', nBatch)
-        for i = 1, nBatch do
+        local nbatches = loader:nbatches()
+        print('number of batches: ', nbatches)
+        for i = 1, nbatches do
             local src, trg, nextTrg = prepro(loader:nextBatch())
             nll = nll + model:forward({src, trg}, nextTrg:view(-1))
             model:backward({src, trg}, nextTrg:view(-1))
             model:update(config.learningRate)
             if i % config.reportEvery == 0 then
-                xlua.progress(i, nBatch)
+                xlua.progress(i, nbatches)
                 print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
                 collectgarbage()
             end
@@ -74,19 +80,19 @@ function train()
             config.learningRate = config.learningRate * config.decayRate
         end
 
-        loader:read("valid")
+        loader:read_valid()
         model:evaluate()
         local valid_nll = 0
-        local nBatch = loader:nBatch()
-        for i = 1, nBatch do
+        local nbatches = loader:nbatches()
+        for i = 1, nbatches do
             local src, trg, nextTrg = prepro(loader:nextBatch())
             valid_nll = valid_nll + model:forward({src, trg}, nextTrg:view(-1))
             if i % 50 == 0 then collectgarbage() end
         end
 
         prev_valid_nll = valid_nll
-        print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/nBatch)))
-        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", config.modelDir, epoch, valid_nll/nBatch)
+        print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/nbatches)))
+        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", config.modelDir, epoch, valid_nll/nbatches)
         paths.mkdir(paths.dirname(checkpoint))
         print('save model to: ' .. checkpoint)
         print('learningRate: ', config.learningRate)

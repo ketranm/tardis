@@ -1,5 +1,4 @@
---[[
-Sequence to Sequence model with Attention
+--[[ Sequence to Sequence model with Attention
 This implement a simple attention mechanism described in
 Effective Approaches to Attention-based Neural Machine Translation
 url: http://www.aclweb.org/anthology/D15-1166
@@ -12,17 +11,17 @@ local model_utils = require 'model.model_utils'
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
 
-function NMT:__init(kwargs)
+function NMT:__init(config)
     -- over write option
-    kwargs.vocabSize = kwargs.srcVocabSize
-    self.encoder = nn.Transducer(kwargs)
+    config.vocabSize = config.srcVocabSize
+    self.encoder = nn.Transducer(config)
 
     -- over write option
-    kwargs.vocabSize = kwargs.trgVocabSize
-    self.decoder = nn.Transducer(kwargs)
+    config.vocabSize = config.trgVocabSize
+    self.decoder = nn.Transducer(config)
 
-    self.glimpse = nn.GlimpseDot(kwargs.hiddenSize)
-    --
+    self.glimpse = nn.GlimpseDot(config.hiddenSize)
+
     self.layer = nn.Sequential()
     -- joining inputs, can be coded more efficient
     local pt = nn.ParallelTable()
@@ -31,16 +30,22 @@ function NMT:__init(kwargs)
 
     self.layer:add(pt)
     self.layer:add(nn.JoinTable(3))
-    self.layer:add(nn.View(-1, 2 * kwargs.hiddenSize))
-    self.layer:add(nn.Linear(2 * kwargs.hiddenSize, kwargs.hiddenSize, false))
+    self.layer:add(nn.View(-1, 2 * config.hiddenSize))
+    self.layer:add(nn.Linear(2 * config.hiddenSize, config.hiddenSize, false))
     self.layer:add(nn.ELU(1, true))
-    self.layer:add(nn.Linear(kwargs.hiddenSize, kwargs.trgVocabSize, true))
+    self.layer:add(nn.Linear(config.hiddenSize, config.trgVocabSize, true))
     self.layer:add(nn.LogSoftMax())
 
-    self.criterion = nn.ClassNLLCriterion()
+    local weights = torch.ones(config.trgVocabSize)
+    weights[config.padidx] = 0
+    self.criterion = nn.ClassNLLCriterion(weights)
 
-    self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
-    self.maxNorm = kwargs.maxNorm or 5
+    self.params, self.gradParams = 
+        model_utils.combine_all_parameters(self.encoder,
+                                            self.decoder,
+                                            self.glimpse,
+                                            self.layer)
+    self.maxNorm = config.maxNorm or 5
 
     -- use buffer to store all the information needed for forward/backward
     self.buffers = {}
@@ -76,17 +81,18 @@ function NMT:backward(input, target)
     local context = buffers.context
     local logProb = buffers.logProb
 
-    -- all good. Ready to backprop
+    -- all good. Ready to back-prop
 
     local gradLoss = self.criterion:backward(logProb, target)
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
     local gradDecoder = gradLayer[2] -- grad to decoder
-    local gradGlimpse = self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
+    local gradGlimpse =
+        self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
 
     gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place 
 
     self.decoder:backward(input[2], gradDecoder)
-    -- init gradient from decoder
+    -- initialize gradient from decoder
     self.encoder:setGradState(self.decoder:getGradState())
     -- backward to encoder
     local gradEncoder = gradGlimpse[1]

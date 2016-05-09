@@ -1,16 +1,19 @@
---[[
-DataLoader: process large bitext data
---]]
-require 'torch'
 local DataLoader = torch.class('DataLoader')
 local _ = require 'moses'
 
 function DataLoader:__init(config)
-    self._GO = "<s>"
-    self._EOS = "</s>"
-    self._UNK = "<unk>"
-    self._PAD = '<pad>'
-    self._START_VOCAB = {self._GO, self._EOS, self._UNK, self._PAD}
+    self._bos = "<s>"
+    self._eos = "</s>"
+    self._unk = "<unk>"
+    self._pad = '<pad>'
+
+    self._start_vocab = {self._bos, self._eos, self._unk, self._pad}
+
+    -- just in case
+    self.bosidx = 1
+    self.eosidx = 2
+    self.unkidx = 3
+    self.padidx = 4
 
     local langs = {config.src, config.trg}
 
@@ -34,8 +37,8 @@ function DataLoader:__init(config)
     self.batchSize = config.batchSize
 
     self.vocab = {}
-    self.tracker = {train = {tensorFiles = {}, nBatch = 0},
-                    valid = {tensorFiles = {}, nBatch = 0}}
+    self.tracker = {train = {tensorFiles = {}, nbatches = 0},
+                    valid = {tensorFiles = {}, nbatches = 0}}
 
     local trainPrefix = path.join(config.dataDir, config.trainPrefix)
     local validPrefix = path.join(config.dataDir, config.validPrefix)
@@ -43,10 +46,10 @@ function DataLoader:__init(config)
     if not path.exists(vocabFile) then
         print('run pre-processing, one-time setup!')
         print('creating source vocabulary ...')
-        self.vocab[1] = self:makeVocab(trainFiles[1], self.srcVocabSize)
+        self.vocab[1] = self:_make_vocab(trainFiles[1], self.srcVocabSize)
 
         print('creating target vocabulary ...')
-        self.vocab[2] = self:makeVocab(trainFiles[2], self.trgVocabSize)
+        self.vocab[2] = self:_make_vocab(trainFiles[2], self.trgVocabSize)
         torch.save(vocabFile, self.vocab)
 
         print('create training tensor files...')
@@ -66,91 +69,99 @@ function DataLoader:__init(config)
 end
 
 
-function DataLoader:read(mode)
+function DataLoader:_read(mode)
     -- shuffle training chunks
-    assert(mode == "train" or mode == "valid")
-    self.curTracker = self.tracker[mode]
-    self.curTracker.tensorFiles = _.shuffle(self.curTracker.tensorFiles)
-    self.chunkIdx = 0
-    self.batchIdx = 0
-    self.curBatch = 0
-    self.maxBatchIdx = -1
+    assert(mode == 'train' or mode == 'valid')
+    self.curr_tracker = self.tracker[mode]
+    self.curr_tracker.tensorFiles = _.shuffle(self.curr_tracker.tensorFiles)
+    self.chunk_idx = 0
+    self.batch_idx = 0
+    self.curr_batch = 0
+    self.max_batch_idx = -1
 end
 
-function DataLoader:nBatch()
-    return self.curTracker.nBatch
+function DataLoader:nbatches()
+    return self.curr_tracker.nbatches
 end
 
 function DataLoader:nextBatch()
     --return the next mini-batch, shuffle data in a chunk
-    assert(self.curBatch < self.curTracker.nBatch)
-    self.curBatch = self.curBatch + 1
-    if self.batchIdx < self.maxBatchIdx then
-        self.batchIdx = self.batchIdx + 1
-        local idx = self.shuffledIdx[self.batchIdx]
+    assert(self.curr_batch < self.curr_tracker.nbatches)
+    self.curr_batch = self.curr_batch + 1
+    if self.batch_idx < self.max_batch_idx then
+        self.batch_idx = self.batch_idx + 1
+        local idx = self.shuffle_idx[self.batch_idx]
         return self.data[idx]
     else
-        self.chunkIdx = self.chunkIdx + 1
-        self.data = torch.load(self.curTracker.tensorFiles[self.chunkIdx])
+        self.chunk_idx = self.chunk_idx + 1
+        self.data = torch.load(self.curr_tracker.tensorFiles[self.chunk_idx])
         assert(#self.data > 0)
-        self.shuffledIdx = torch.randperm(#self.data)
-        self.batchIdx = 1
-        self.maxBatchIdx = #self.data
-        local idx = self.shuffledIdx[self.batchIdx]
+        self.shuffle_idx = torch.randperm(#self.data)
+        self.batch_idx = 1
+        self.max_batch_idx = #self.data
+        local idx = self.shuffle_idx[self.batch_idx]
         return self.data[idx]
     end
 end
 
-function DataLoader:makeVocab(textFile, vocabSize)
-    --[[Create vocabulary with maximum vocabSize words.
-    Args:
-        - textFile: source or target file, tokenized, lowercased
-        - vocabSize: the number of top frequent words in the textFile
+function DataLoader:read_train()
+    self:_read('train')
+end
+
+function DataLoader:read_valid()
+    self:_read('valid')
+end
+
+function DataLoader:_make_vocab(textFile, vocabSize)
+    --[[ Create vocabulary with maximum vocabSize words.
+    Parameters:
+    - `textFile` : source or target file, tokenized, lowercased
+    - `vocabSize` : the number of top frequent words in the textFile
     --]]
-    local _START_VOCAB = self._START_VOCAB
-    local wordFreq = {}
+    local _start_vocab = self._start_vocab
+    local word_freq = {}
     print('reading in ' .. textFile)
     for line in io.lines(textFile) do
         for w in line:gmatch("%S+") do
-            wordFreq[w] = (wordFreq[w] or 0) + 1
+            word_freq[w] = (word_freq[w] or 0) + 1
         end
     end
 
     local words = {}
-    for w in pairs(wordFreq) do
+    for w in pairs(word_freq) do
         words[#words + 1] = w
     end
 
     -- sort by frequency
     table.sort(words, function(w1, w2)
-        return wordFreq[w1] > wordFreq[w2] or
-            wordFreq[w1] == wordFreq[w2] and w1 < w2
+        return word_freq[w1] > word_freq[w2] or
+            word_freq[w1] == word_freq[w2] and w1 < w2
     end)
 
-    local wordIdx = {}
+    local widx = {}
 
-    for i, w in ipairs(_START_VOCAB) do
-        wordIdx[w] = i
+    for i, w in ipairs(_start_vocab) do
+        widx[w] = i
     end
 
-    local offset = #_START_VOCAB
+    local offset = #_start_vocab
     for i = 1, vocabSize - offset do
         local w = words[i]
-        wordIdx[w] = i + offset
+        widx[w] = i + offset
     end
 
     -- free memory
     collectgarbage()
-    return wordIdx
+    return widx
 end
 
-function DataLoader:_createChunk(buckets, tensorFile)
+function DataLoader:_create_chunk(buckets, tensorFile)
     local chunks = {}
-    for _bucketId, bucket in pairs(buckets) do
+    for bidx, bucket in pairs(buckets) do
         -- make a big torch.IntTensor matrix
         local bx = torch.IntTensor(bucket.source):split(self.batchSize, 1)
         local by = torch.IntTensor(bucket.target):split(self.batchSize, 1)
-        buckets[_bucketId] = nil -- free memory
+        buckets[bidx] = nil -- free memory
         -- sanity check
         assert(#bx == #by)
         for i = 1, #bx do
@@ -174,10 +185,10 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
     local srcVocab, trgVocab = unpack(self.vocab)
     -- helper
     local batchSize = self.batchSize
-    local chunkIdx = 0
+    local chunk_idx = 0
     local count = 0 -- sentence counter
     local buckets = {}
-    local nBatch = 0
+    local nbatches = 0
 
     local diff = 5 -- maximum different in length of the target
 
@@ -187,49 +198,49 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
         local srcTokens = stringx.split(source)
         local trgTokens = stringx.split(target)
         local trgLength = #trgTokens + diff - (#trgTokens % diff)
-        local _bucketId =  string.format('%d|%d', #srcTokens, trgLength)
+        local bidx =  string.format('%d|%d', #srcTokens, trgLength)
 
-        local tokenIdx, token
+        local token_idx, token
         -- reverse the source sentence
-        local revSrcIds = {}
+        local rev_src_rev_idx = {}
         for i = #srcTokens, 1, -1 do
             token = srcTokens[i]
-            tokenIdx = srcVocab[token] or srcVocab[self._UNK]
-            table.insert(revSrcIds, tokenIdx)
+            token_idx = srcVocab[token] or srcVocab[self._unk]
+            table.insert(rev_src_rev_idx, token_idx)
         end
 
         -- pad GO and EOS to target
-        local trgIds = {trgVocab[self._GO]}
+        local trg_idx = {trgVocab[self._bos]}
         for _, token in ipairs(trgTokens) do
-            tokenIdx = trgVocab[token] or trgVocab[self._UNK]
-            table.insert(trgIds, tokenIdx)
+            token_idx = trgVocab[token] or trgVocab[self._unk]
+            table.insert(trg_idx, token_idx)
         end
-        table.insert(trgIds, trgVocab[self._EOS])
+        table.insert(trg_idx, trgVocab[self._eos])
         -- add PAD to the end after <EOS>
         for i = 1, trgLength - #trgTokens do
-            table.insert(trgIds, trgVocab[self._PAD])
+            table.insert(trg_idx, trgVocab[self._pad])
         end
 
         -- put sentence pairs to corresponding bucket
-        buckets[_bucketId] = buckets[_bucketId] or {source = {}, target = {}}
-        local bucket = buckets[_bucketId]
-        table.insert(bucket.source, revSrcIds)
-        table.insert(bucket.target, trgIds)
+        buckets[bidx] = buckets[bidx] or {source = {}, target = {}}
+        local bucket = buckets[bidx]
+        table.insert(bucket.source, rev_src_rev_idx)
+        table.insert(bucket.target, trg_idx)
 
         if count % chunkSize == 0 then
-            chunkIdx = chunkIdx + 1
+            chunk_idx = chunk_idx + 1
 
-            local tensorFile = tensorPrefix .. chunkIdx .. '.t7'
+            local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
             table.insert(tracker.tensorFiles, tensorFile)
-            tracker.nBatch = tracker.nBatch + self:_createChunk(buckets, tensorFile)
+            tracker.nbatches = tracker.nbatches + self:_create_chunk(buckets, tensorFile)
             buckets = {}
         end
     end
     if count % chunkSize  > 1 then
         -- process the remaining
-        chunkIdx = chunkIdx + 1
-        local tensorFile = tensorPrefix .. chunkIdx .. '.t7'
+        chunk_idx = chunk_idx + 1
+        local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
         table.insert(tracker.tensorFiles, tensorFile)
-        tracker.nBatch = tracker.nBatch + self:_createChunk(buckets, tensorFile)
+        tracker.nbatches = tracker.nbatches + self:_create_chunk(buckets, tensorFile)
     end
 end
