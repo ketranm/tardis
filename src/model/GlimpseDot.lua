@@ -1,7 +1,7 @@
 local GlimpseDot, parent = torch.class('nn.GlimpseDot', 'nn.Module')
 
 
-function GlimpseDot:__init(input_size)
+function GlimpseDot:__init()
     self.gradInput = {torch.Tensor(), torch.Tensor()}
     -- buffer
     self.att_buffer = torch.Tensor()
