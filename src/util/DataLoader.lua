@@ -2,9 +2,9 @@ local DataLoader = torch.class('DataLoader')
 local _ = require 'moses'
 
 function DataLoader:__init(config)
-    self._bos = "<s>"
-    self._eos = "</s>"
-    self._unk = "<unk>"
+    self._bos = '<s>'
+    self._eos = '</s>'
+    self._unk = '<unk>'
     self._pad = '<pad>'
 
     self._start_vocab = {self._bos, self._eos, self._unk, self._pad}
@@ -20,11 +20,11 @@ function DataLoader:__init(config)
     -- data path
 
     local trainFiles = _.map(langs, function(i, ext)
-        return path.join(config.dataDir, string.format("%s.%s", config.trainPrefix, ext))
+        return path.join(config.dataDir, string.format('%s.%s', config.trainPrefix, ext))
     end)
 
     local validFiles = _.map(langs, function(i, ext)
-        return path.join(config.dataDir, string.format("%s.%s", config.validPrefix, ext))
+        return path.join(config.dataDir, string.format('%s.%s', config.validPrefix, ext))
     end)
 
     -- helper
@@ -54,11 +54,11 @@ function DataLoader:__init(config)
 
         print('create training tensor files...')
         self:text2Tensor(trainFiles, trainPrefix,
-            config.chunkSize, self.tracker["train"])
+            config.chunkSize, self.tracker['train'])
 
         print('create validation tensor files...')
         self:text2Tensor(validFiles, validPrefix,
-            config.chunkSize, self.tracker["valid"])
+            config.chunkSize, self.tracker['valid'])
 
         torch.save(indexFile, self.tracker)
     else
@@ -122,7 +122,7 @@ function DataLoader:_make_vocab(textFile, vocabSize)
     local word_freq = {}
     print('reading in ' .. textFile)
     for line in io.lines(textFile) do
-        for w in line:gmatch("%S+") do
+        for w in line:gmatch('%S+') do
             word_freq[w] = (word_freq[w] or 0) + 1
         end
     end
