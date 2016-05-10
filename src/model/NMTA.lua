@@ -41,7 +41,8 @@ function NMT:__init(config)
 
     self.padidx = config.padidx
     self.criterion = nn.ClassNLLCriterion(weights, false)
-    self.tot = torch.Tensor() -- count non padding symbol
+    self.tot = torch.Tensor() -- count non padding symbols
+    self.numSamples = 0
 
     self.params, self.gradParams = 
         model_utils.combine_all_parameters(self.encoder,
@@ -63,14 +64,16 @@ function NMT:forward(input, target)
     - `target` : a tensor of next words
 
     Return:
-    - `logProb` : negative log-likelihood of the minibatch
+    - `logProb` : negative log-likelihood of the mini-batch
     --]]
 
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
-    self.tot = target:ne(self.padidx)
+    self.tot:resizeAs(target)
+    self.tot:ne(target, self.padidx)
+    self.numSamples = self.tot:sum()
     local nll = self.criterion:forward(logProb, target)
-    return nll/ self.tot:sum()
+    return nll/ self.numSamples
 
 end
 
@@ -91,7 +94,7 @@ function NMT:backward(input, target)
 
     local gradLoss = self.criterion:backward(logProb, target)
     -- self.sum already count in the forward pass
-    gradLoss:div(self.tot:sum())
+    gradLoss:div(self.numSamples)
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
     local gradDecoder = gradLayer[2] -- grad to decoder
     local gradGlimpse =
