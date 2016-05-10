@@ -46,10 +46,10 @@ function DataLoader:__init(config)
     if not path.exists(vocabFile) then
         print('run pre-processing, one-time setup!')
         print('creating source vocabulary ...')
-        self.vocab[1] = self:_make_vocab(trainFiles[1], self.srcVocabSize)
+        self.vocab[1] = self:_makeVocab(trainFiles[1], self.srcVocabSize)
 
         print('creating target vocabulary ...')
-        self.vocab[2] = self:_make_vocab(trainFiles[2], self.trgVocabSize)
+        self.vocab[2] = self:_makeVocab(trainFiles[2], self.trgVocabSize)
         torch.save(vocabFile, self.vocab)
 
         print('create training tensor files...')
@@ -104,15 +104,15 @@ function DataLoader:nextBatch()
     end
 end
 
-function DataLoader:read_train()
+function DataLoader:readTrain()
     self:_read('train')
 end
 
-function DataLoader:read_valid()
+function DataLoader:readValid()
     self:_read('valid')
 end
 
-function DataLoader:_make_vocab(textFile, vocabSize)
+function DataLoader:_makeVocab(textFile, vocabSize)
     --[[ Create vocabulary with maximum vocabSize words.
     Parameters:
     - `textFile` : source or target file, tokenized, lowercased
@@ -155,7 +155,7 @@ function DataLoader:_make_vocab(textFile, vocabSize)
     return widx
 end
 
-function DataLoader:_create_chunk(buckets, tensorFile)
+function DataLoader:_createChunk(buckets, tensorFile)
     local chunks = {}
     for bidx, bucket in pairs(buckets) do
         -- make a big torch.IntTensor matrix
@@ -202,21 +202,21 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
 
         local token_idx, token
         -- reverse the source sentence
-        local rev_src_rev_idx = {}
+        local src_rev_idx = {}
         for i = #srcTokens, 1, -1 do
             token = srcTokens[i]
             token_idx = srcVocab[token] or srcVocab[self._unk]
-            table.insert(rev_src_rev_idx, token_idx)
+            table.insert(src_rev_idx, token_idx)
         end
 
-        -- pad GO and EOS to target
+        -- add BOS and EOS to target
         local trg_idx = {trgVocab[self._bos]}
         for _, token in ipairs(trgTokens) do
             token_idx = trgVocab[token] or trgVocab[self._unk]
             table.insert(trg_idx, token_idx)
         end
         table.insert(trg_idx, trgVocab[self._eos])
-        -- add PAD to the end after <EOS>
+        -- add PAD to the end after EOS
         for i = 1, trgLength - #trgTokens do
             table.insert(trg_idx, trgVocab[self._pad])
         end
@@ -224,7 +224,7 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
         -- put sentence pairs to corresponding bucket
         buckets[bidx] = buckets[bidx] or {source = {}, target = {}}
         local bucket = buckets[bidx]
-        table.insert(bucket.source, rev_src_rev_idx)
+        table.insert(bucket.source, src_rev_idx)
         table.insert(bucket.target, trg_idx)
 
         if count % chunkSize == 0 then
@@ -232,7 +232,7 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
 
             local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
             table.insert(tracker.tensorFiles, tensorFile)
-            tracker.nbatches = tracker.nbatches + self:_create_chunk(buckets, tensorFile)
+            tracker.nbatches = tracker.nbatches + self:_createChunk(buckets, tensorFile)
             buckets = {}
         end
     end
@@ -241,6 +241,6 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
         chunk_idx = chunk_idx + 1
         local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
         table.insert(tracker.tensorFiles, tensorFile)
-        tracker.nbatches = tracker.nbatches + self:_create_chunk(buckets, tensorFile)
+        tracker.nbatches = tracker.nbatches + self:_createChunk(buckets, tensorFile)
     end
 end
