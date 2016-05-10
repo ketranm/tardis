@@ -9,10 +9,6 @@ function GlimpseDot:__init(input_size)
     -- helper
     self.softmax = nn.SoftMax()
     self.output = torch.Tensor()
-
-    -- TODO: delete this if it doesn't work
-    self.flag = false
-    self.p = 0.3
 end
 
 function GlimpseDot:updateOutput(input)
@@ -32,29 +28,9 @@ function GlimpseDot:updateOutput(input)
     local buffer_att = self.att_buffer:view(N * Ty, Tx)
     self.att = self.softmax(buffer_att)
 
-    -- some hack here
-    if self.flag then
-        local n = math.min(math.floor(self.p * Tx + 1), Tx)
-        -- sample the shit
-        local sample = torch.multinomial(self.att, n)
-	--print('att') print(self.att)
-	--print('sample') print(sample)
-        local kept_att = torch.zeros(#self.att):typeAs(self.att):scatter(2, sample, self.att)
-        local denom = kept_att:sum(2):repeatTensor(1, Tx):add(1e-12)
-        -- overwrite this shit
-        self.att = kept_att:cdiv(denom)
-	--print('att_r') print(self.att)
-    end
     self.att = self.att:view(N, Ty, Tx)
     self.output:resizeAs(y):bmm(self.att, x)
     return self.output
-end
-
-
--- TODO: delete if needed
-function GlimpseDot:setFlag(_flag, p)
-    self.flag = _flag
-    self.p = p
 end
 
 function GlimpseDot:backward(input, gradOutput, scale)
