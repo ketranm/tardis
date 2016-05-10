@@ -38,13 +38,16 @@ function NMT:__init(config)
 
     local weights = torch.ones(config.trgVocabSize)
     weights[config.padidx] = 0
-    self.criterion = nn.ClassNLLCriterion(weights)
+
+    self.padidx = config.padidx
+    self.criterion = nn.ClassNLLCriterion(weights, false)
+    self.tot = torch.Tensor() -- count non padding symbol
 
     self.params, self.gradParams = 
         model_utils.combine_all_parameters(self.encoder,
-                                            self.decoder,
-                                            self.glimpse,
-                                            self.layer)
+                                           self.decoder,
+                                           self.glimpse,
+                                           self.layer)
     self.maxNorm = config.maxNorm or 5
 
     -- use buffer to store all the information needed for forward/backward
@@ -65,7 +68,10 @@ function NMT:forward(input, target)
 
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
-    return self.criterion:forward(logProb, target)
+    self.tot = target:ne(self.padidx)
+    local nll = self.criterion:forward(logProb, target)
+    return nll/ self.tot:sum()
+
 end
 
 
@@ -84,6 +90,8 @@ function NMT:backward(input, target)
     -- all good. Ready to back-prop
 
     local gradLoss = self.criterion:backward(logProb, target)
+    -- self.sum already count in the forward pass
+    gradLoss:div(self.tot:sum())
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
     local gradDecoder = gradLayer[2] -- grad to decoder
     local gradGlimpse =
