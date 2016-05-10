@@ -101,7 +101,6 @@ function layer:updateOutput(input)
     return self.output
 end
 
-
 function layer:backward(input, gradOutput)
     local x, h = unpack(input)
     local N, T, D = h:size(1), h:size(2), h:size(3)
@@ -157,7 +156,6 @@ function layer:backward(input, gradOutput)
 
     return self.gradInput
 end
-
 
 function layer:clearState()
     nn.utils.clear(self, {

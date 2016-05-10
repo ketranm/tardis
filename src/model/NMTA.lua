@@ -55,7 +55,6 @@ function NMT:__init(config)
     self.buffers = {}
 end
 
-
 function NMT:forward(input, target)
     --[[ Forward pass of NMT
 
@@ -76,7 +75,6 @@ function NMT:forward(input, target)
     return nll/ self.numSamples
 
 end
-
 
 function NMT:backward(input, target)
     -- zero grad manually here
@@ -110,7 +108,6 @@ function NMT:backward(input, target)
     self.encoder:backward(input[1], gradEncoder)
 end
 
-
 function NMT:update(learningRate)
     local gradNorm = self.gradParams:norm()
     local scale = learningRate
@@ -119,7 +116,6 @@ function NMT:update(learningRate)
     end
     self.params:add(self.gradParams:mul(-scale)) -- do it in-place
 end
-
 
 function NMT:parameters()
     return self.params
@@ -135,7 +131,6 @@ function NMT:evaluate()
     self.decoder:evaluate()
 end
 
-
 function NMT:load(fileName)
     local params = torch.load(fileName)
     self.params:copy(params)
@@ -146,7 +141,6 @@ function NMT:save(fileName)
 end
 
 -- useful interface for beam search
-
 function NMT:stepEncoder(x)
     --[[ Encode the source sequence
     All the information produced by the encoder is stored in buffers
@@ -193,7 +187,7 @@ end
 function NMT:indexDecoderState(index)
     --[[ This method is useful for beam search.
     It is similar to torch.index function, return a new state of kept index
-    
+
     Parameters:
     - `index` : torch.LongTensor object
 

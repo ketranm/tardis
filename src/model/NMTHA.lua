@@ -11,16 +11,16 @@ local model_utils = require 'model.model_utils'
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
 
-function NMT:__init(kwargs)
+function NMT:__init(config)
     -- over write option
-    kwargs.vocabSize = kwargs.srcVocabSize
-    self.encoder = nn.Transducer(kwargs)
+    config.vocabSize = config.srcVocabSize
+    self.encoder = nn.Transducer(config)
 
     -- over write option
-    kwargs.vocabSize = kwargs.trgVocabSize
-    self.decoder = nn.Transducer(kwargs)
+    config.vocabSize = config.trgVocabSize
+    self.decoder = nn.Transducer(config)
 
-    self.glimpse = nn.Glimpse(kwargs.hiddenSize)
+    self.glimpse = nn.Glimpse(config.hiddenSize)
     --
     self.layer = nn.Sequential()
     -- joining inputs, can be coded more efficient
@@ -30,16 +30,16 @@ function NMT:__init(kwargs)
 
     self.layer:add(pt)
     self.layer:add(nn.JoinTable(3))
-    self.layer:add(nn.View(-1, 2 * kwargs.hiddenSize))
-    self.layer:add(nn.Linear(2 * kwargs.hiddenSize, kwargs.hiddenSize, false))
+    self.layer:add(nn.View(-1, 2 * config.hiddenSize))
+    self.layer:add(nn.Linear(2 * config.hiddenSize, config.hiddenSize, false))
     self.layer:add(nn.ELU(1, true))
-    self.layer:add(nn.Linear(kwargs.hiddenSize, kwargs.trgVocabSize, true))
+    self.layer:add(nn.Linear(config.hiddenSize, config.trgVocabSize, true))
     self.layer:add(nn.LogSoftMax())
 
     self.criterion = nn.ClassNLLCriterion()
 
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
-    self.maxNorm = kwargs.maxNorm or 5
+    self.maxNorm = config.maxNorm or 5
 
     -- use buffer to store all the information needed for forward/backward
     self.buffers = {}
@@ -61,7 +61,6 @@ function NMT:forward(input, target)
     local logProb = self:stepDecoder(input[2])
     return self.criterion:forward(logProb, target)
 end
-
 
 function NMT:backward(input, target)
     -- zero grad manually here
@@ -92,7 +91,6 @@ function NMT:backward(input, target)
     self.encoder:backward(input[1], gradEncoder)
 end
 
-
 function NMT:update(learningRate)
     local gradNorm = self.gradParams:norm()
     local scale = learningRate
@@ -101,7 +99,6 @@ function NMT:update(learningRate)
     end
     self.params:add(self.gradParams:mul(-scale)) -- do it in-place
 end
-
 
 function NMT:parameters()
     return self.params
@@ -116,7 +113,6 @@ function NMT:evaluate()
     self.encoder:evaluate()
     self.decoder:evaluate()
 end
-
 
 function NMT:load(fileName)
     local params = torch.load(fileName)

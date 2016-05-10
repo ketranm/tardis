@@ -41,22 +41,18 @@ function Transducer:__init(config)
     end
 end
 
-
 function Transducer:updateOutput(input)
     local batchSize, length = input:size(1), input:size(2)
     return self.transducer:forward(input)
 end
 
-
 function Transducer:backward(input, gradOutput, scale)
     return self.transducer:backward(input, gradOutput, scale)
 end
 
-
 function Transducer:parameters()
     return self.transducer:parameters()
 end
-
 
 function Transducer:lastState()
     local state = {}
@@ -66,25 +62,21 @@ function Transducer:lastState()
     return state
 end
 
-
 function Transducer:training()
     self.transducer:training()
     parent.training(self)
 end
-
 
 function Transducer:evaluate()
     self.transducer:evaluate()
     parent.evaluate(self)
 end
 
-
 function Transducer:initState(state)
     for i, s in ipairs(state) do
         self._rnns[i]:initState(s)
     end
 end
-
 
 function Transducer:getGradState()
     local gradState = {}
@@ -94,13 +86,11 @@ function Transducer:getGradState()
     return gradState
 end
 
-
 function Transducer:setGradState(gradState)
     for i, grad in ipairs(gradState) do
         self._rnns[i]:setGradState(grad)
     end
 end
-
 
 function Transducer:updateGradInput(input, gradOutput)
     self:backward(input, gradOutput, 0)
