@@ -1,6 +1,5 @@
 -- Beam search
 local utils = require 'util.utils'
-local BLEU = require 'util.BLEU'
 local BeamSearch = torch.class('BeamSearch')
 
 

@@ -8,44 +8,58 @@ local model_utils = require 'model.model_utils'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
-function NMT:__init(kwargs)
-    local kwargs = kwargs;
+function NMT:__init(config)
+    local config = config;
 
     -- over write option
-    kwargs.vocabSize = kwargs.srcVocabSize
-    self.encoder = nn.Transducer(kwargs)
+    config.vocabSize = config.srcVocabSize
+    self.encoder = nn.Transducer(config)
 
     -- over write option
-    kwargs.vocabSize = kwargs.trgVocabSize
-    self.decoder = nn.Transducer(kwargs)
+    config.vocabSize = config.trgVocabSize
+    self.decoder = nn.Transducer(config)
 
     self.layer = nn.Sequential()
-    self.layer:add(nn.View(-1, kwargs.hiddenSize))
-    self.layer:add(nn.Linear(kwargs.hiddenSize, kwargs.trgVocabSize))
+    self.layer:add(nn.View(-1, config.hiddenSize))
+    self.layer:add(nn.Linear(config.hiddenSize, config.trgVocabSize))
     self.layer:add(nn.LogSoftMax())
 
-    self.criterion = nn.ClassNLLCriterion()
+    local weights = torch.ones(config.trgVocabSize)
+    weights[config.padidx] = 0
+    self.padidx = config.padidx
+
+    self.criterion = nn.ClassNLLCriterion(weights, false)
+    self.tot = torch.Tensor()
+    self.numSamples = 0
+
     self.gradEncoder = torch.Tensor()  -- always zeros
 
     -- get parameters and gradients for optimization
     self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.layer)
-    self.maxNorm = kwargs.maxNorm or 5
+    self.maxNorm = config.maxNorm or 5
     self.buffers = {}
 end
 
 
 function NMT:forward(input, target)
     --[[ Forward pass of NMT
+
     Parameters:
     - `input` : table of source and target tensor
     - `target` : a tensor of next words
+
     Return:
-    - `logProb` : negative log-likelihood of the minibatch
+    - `logProb` : negative log-likelihood of the mini-batch
     --]]
 
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
-    return self.criterion:forward(logProb, target)
+    self.tot:resizeAs(target)
+    self.tot:ne(target, self.padidx)
+    self.numSamples = self.tot:sum()
+    local nll = self.criterion:forward(logProb, target)
+    return nll/ self.numSamples
+
 end
 
 
@@ -63,6 +77,8 @@ function NMT:backward(input, target)
     -- all good. Ready to backprop
 
     local gradLoss = self.criterion:backward(logProb, target)
+    gradLoss:div(self.numSamples)
+
     local gradDecoder = self.layer:backward(outputDecoder, gradLoss)
 
     self.decoder:backward(input[2], gradDecoder)

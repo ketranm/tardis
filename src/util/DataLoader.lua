@@ -29,7 +29,7 @@ function DataLoader:__init(config)
 
     -- helper
     local vocabFile = path.join(config.dataDir, 'vocab.t7')
-    -- auxiliary file to store additional information about chunks
+    -- auxiliary file to store additional information about shards
     local indexFile = path.join(config.dataDir, 'index.t7')
 
     self.srcVocabSize = config.srcVocabSize
@@ -54,11 +54,11 @@ function DataLoader:__init(config)
 
         print('create training tensor files...')
         self:text2Tensor(trainFiles, trainPrefix,
-            config.chunkSize, self.tracker['train'])
+            config.shardSize, self.tracker['train'])
 
         print('create validation tensor files...')
         self:text2Tensor(validFiles, validPrefix,
-            config.chunkSize, self.tracker['valid'])
+            config.shardSize, self.tracker['valid'])
 
         torch.save(indexFile, self.tracker)
     else
@@ -70,11 +70,11 @@ end
 
 
 function DataLoader:_read(mode)
-    -- shuffle training chunks
+    -- shuffle training shard
     assert(mode == 'train' or mode == 'valid')
     self.curr_tracker = self.tracker[mode]
     self.curr_tracker.tensorFiles = _.shuffle(self.curr_tracker.tensorFiles)
-    self.chunk_idx = 0
+    self.shard_idx = 0
     self.batch_idx = 0
     self.curr_batch = 0
     self.max_batch_idx = -1
@@ -85,7 +85,7 @@ function DataLoader:nbatches()
 end
 
 function DataLoader:nextBatch()
-    --return the next mini-batch, shuffle data in a chunk
+    --return the next mini-batch, shuffle data in a shard
     assert(self.curr_batch < self.curr_tracker.nbatches)
     self.curr_batch = self.curr_batch + 1
     if self.batch_idx < self.max_batch_idx then
@@ -93,8 +93,8 @@ function DataLoader:nextBatch()
         local idx = self.shuffle_idx[self.batch_idx]
         return self.data[idx]
     else
-        self.chunk_idx = self.chunk_idx + 1
-        self.data = torch.load(self.curr_tracker.tensorFiles[self.chunk_idx])
+        self.shard_idx = self.shard_idx + 1
+        self.data = torch.load(self.curr_tracker.tensorFiles[self.shard_idx])
         assert(#self.data > 0)
         self.shuffle_idx = torch.randperm(#self.data)
         self.batch_idx = 1
@@ -155,8 +155,8 @@ function DataLoader:_makeVocab(textFile, vocabSize)
     return widx
 end
 
-function DataLoader:_createChunk(buckets, tensorFile)
-    local chunks = {}
+function DataLoader:_createShard(buckets, tensorFile)
+    local shard = {}
     for bidx, bucket in pairs(buckets) do
         -- make a big torch.IntTensor matrix
         local bx = torch.IntTensor(bucket.source):split(self.batchSize, 1)
@@ -166,16 +166,16 @@ function DataLoader:_createChunk(buckets, tensorFile)
         assert(#bx == #by)
         for i = 1, #bx do
             assert(bx[i]:size(1) == by[i]:size(1))
-            table.insert(chunks, {bx[i], by[i]})
+            table.insert(shard, {bx[i], by[i]})
         end
     end
-    torch.save(tensorFile, chunks)
-    return #chunks
+    torch.save(tensorFile, shard)
+    return #shard
 end
 
-function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
+function DataLoader:text2Tensor(textFiles, tensorPrefix, shardSize, tracker)
     --[[Load source and target text file and save to tensor format.
-        If the files are too large, process a chunk of chunkSize sentences at a time
+        If the files are too large, process a shard of shardSize sentences at a time
     --]]
 
     local files = _.map(textFiles, function(i, file)
@@ -185,7 +185,7 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
     local srcVocab, trgVocab = unpack(self.vocab)
     -- helper
     local batchSize = self.batchSize
-    local chunk_idx = 0
+    local shard_idx = 0
     local count = 0 -- sentence counter
     local buckets = {}
     local nbatches = 0
@@ -227,20 +227,20 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, chunkSize, tracker)
         table.insert(bucket.source, src_rev_idx)
         table.insert(bucket.target, trg_idx)
 
-        if count % chunkSize == 0 then
-            chunk_idx = chunk_idx + 1
+        if count % shardSize == 0 then
+            shard_idx = shard_idx + 1
 
-            local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
+            local tensorFile = tensorPrefix .. shard_idx .. '.t7'
             table.insert(tracker.tensorFiles, tensorFile)
-            tracker.nbatches = tracker.nbatches + self:_createChunk(buckets, tensorFile)
+            tracker.nbatches = tracker.nbatches + self:_createShard(buckets, tensorFile)
             buckets = {}
         end
     end
-    if count % chunkSize  > 1 then
+    if count % shardSize  > 1 then
         -- process the remaining
-        chunk_idx = chunk_idx + 1
-        local tensorFile = tensorPrefix .. chunk_idx .. '.t7'
+        shard_idx = shard_idx + 1
+        local tensorFile = tensorPrefix .. shard_idx .. '.t7'
         table.insert(tracker.tensorFiles, tensorFile)
-        tracker.nbatches = tracker.nbatches + self:_createChunk(buckets, tensorFile)
+        tracker.nbatches = tracker.nbatches + self:_createShard(buckets, tensorFile)
     end
 end
