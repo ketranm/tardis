@@ -1,5 +1,8 @@
 --[[ For computing reward
-Mostly copy&paste from MIXER's code
+Rewrite to make it work in TARDIS
+
+Getting the right reward is the most crucial part in training REINFORCE
+So we need to do it nice, slow and well documented
 --]]
 
 require 'math'
@@ -9,34 +12,48 @@ local threads = require 'threads'
 
 local RewardFactory = torch.class('RewardFactory')
 
--- This class returns an object for computing the reward at a
--- given time step.
--- reward_type  type of reward, either ROUGE or BLEU
--- start  index of time step at which we start computing the reward
--- bptt   the maximum length of a sequence.
--- dict_size  size of the dictionary
--- eos_indx is the id of the end of sentence token. Symbols after
---  the first occurrence of eos (if any) are skipped.
--- pad_indx is the id of the padding token
--- mbsz mini-batch size
+--[[ This class returns an object for computing the reward at a
+given time step.
+The reward is partial BLEU score, smoothed
 
-function RewardFactory:__init(dict_size, eos_indx, unk_indx)
-    --[[ Initiate the Factory class
+Parameters:
+- `start` : index of time step at which we start computing the reward
+- `bptt` :  the maximum length of a sequence.
+- `vocab_size` : size of the dictionary
+- `eosidx` : the id of the end of sentence token. Symbols after
+    the first occurrence of eos (if any) are skipped.
+- `padidx` : the id of the padding token
+- `mbsz` : mini-batch size, which will be computed dynamically
+--]]
+
+function RewardFactory:__init(vocab_size, eosidx, unkidx, padidx)
+    --[[ Initiate the Factory class.
+    NOTE: MIXER compute the reward at the end of an episode, this reward
+        will be bproped to the sequence till the point where we start drawn
+        samples.
+
+        Some variance reduction technique for REINFORCE is not used in MIXER
+        TODO: Double check
+
     Parameters:
-    - `dict_size` : integer, vocabulary size
-    - `eos_indx` : integer, end of sentence index (usually 2)
-    - `unk_indx` : integer, unknown index, usually 3
+    - `vocab_size` : integer, vocabulary size
+    - `eosidx` : integer, end of sentence index
+    - `unkidx` : integer, unknown index
+    - `padidx` : integer, index of padding symbol <pad>
     --]]
 
     self.start = 1
-    self.dict_size = dict_size
-    self.eos_indx = eos_indx
-    if unk_indx == nil then
+
+    self.vocab_size = vocab_size
+    self.eosidx = eosidx
+    self.padidx = padidx
+
+    if unkidx == nil then
         print('dictionary does not have <unk>, ' ..
               'we are not skipping then while computing BLEU')
-        self.unk_indx = -1
+        self.unkidx = -1
     else
-        self.unk_indx = unk_indx
+        self.unkidx = unkidx
     end
 
     self.reward_val = torch.Tensor()
@@ -106,6 +123,14 @@ function RewardFactory:cuda()
 end
 
 function RewardFactory:get_reward(target, input, tt)
+    --[[ Note on computing the reward
+    TARDIS is implemented efficiently (without cloning model parameters),
+    RNNs in TARDIS take a 2D tensor input and target (mbsz, bptt) and
+    compute a forward pass over all time steps.
+
+    For that reason, here, target and input will be 2D tensors (mbsz, bptt)
+
+    --]]
     --[[
     Parameters:
     - `target` : table, each entry is a tensor of size mini-batch size
@@ -128,6 +153,9 @@ function RewardFactory:get_reward(target, input, tt)
 
     --]]
 
+    -- first attempt
+    -- It is OK to use 1D tensor for the reward values, we will duplicate it
+    -- to the number of generation steps
     self.reward_val:fill(0)
 
     -- get the bptt steps here
@@ -138,9 +166,9 @@ function RewardFactory:get_reward(target, input, tt)
         local bptt = target:size(1) -- this will be the length of the target
         -- get local copy of class member variables
         local start = args.start
-        local dict_size = args.dict_size
-        local eos_indx = args.eos_indx
-        local unk_indx = args.unk_indx
+        local vocab_size = args.vocab_size
+        local eosidx = args.eosidx
+        local unkidx = args.unkidx
         local mbsz = args.mbsz
         local reward_val = args.reward_val
         local inputt = torch.Tensor(bptt - start + 1)
@@ -161,14 +189,14 @@ function RewardFactory:get_reward(target, input, tt)
             local input_length = bptt
 
             for step = 1, bptt do
-                if target[step][ss] == eos_indx then
+                if target[step][ss] == eosidx then
                     target_length = step - 1
                     break
                 end
             end
 
             for step = 1, bptt do
-                if input[step][ss] == eos_indx then
+                if input[step][ss] == eosidx then
                     input_length = step - 1
                     break
                 end
@@ -223,11 +251,11 @@ function RewardFactory:get_reward(target, input, tt)
                     --]]
                     counts_input[nn] = evals.get_counts(
                         inputt:narrow(1, curr_offs, eff_seq_length_input - curr_offs + 1),
-                        nn, dict_size)
+                        nn, vocab_size)
 
                     counts_target[nn] = evals.get_counts(
                         targett:narrow(1, curr_offs, eff_seq_length_target - curr_offs + 1),
-                        nn, dict_size, unk_indx)
+                        nn, vocab_size, unkidx)
 
                     score[nn] = evals.compute_score(
                                     counts_input[nn], counts_target[nn],
@@ -267,9 +295,9 @@ function RewardFactory:get_reward(target, input, tt)
     print(self.input)
     print(self.target)
 
-    local args = {start = self.start, dict_size = self.dict_size,
-                eos_indx = self.eos_indx,
-                unk_indx = self.unk_indx,
+    local args = {start = self.start, vocab_size = self.vocab_size,
+                eosidx = self.eosidx,
+                unkidx = self.unkidx,
                 mbsz = mbsz, reward_val = self.reward_val,
                 inputt = self.inputt, targett = self.targett,
                 nthreads = self.nthreads, order = self.order,
@@ -285,8 +313,8 @@ end
 
 function RewardFactory:num_samples(target, input)
     -- we do not do padding, this code needs to be rewritten
-    local pad_indx = -1
-    self.reset:ne(target[self.start], pad_indx)
+    local padidx = -1
+    self.reset:ne(target[self.start], padidx)
     -- can actually return the batch size
     -- return self.reset:numel()
     return self.reset:sum()
