@@ -36,9 +36,19 @@ function NMT:__init(config)
     self.layer:add(nn.Linear(config.hiddenSize, config.trgVocabSize, true))
     self.layer:add(nn.LogSoftMax())
 
-    self.criterion = nn.ClassNLLCriterion()
+    local weights = torch.ones(config.trgVocabSize)
+    weights[config.padidx] = 0
 
-    self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.glimpse, self.layer)
+    self.padidx = config.padidx
+    self.criterion = nn.ClassNLLCriterion(weights, false)
+    self.tot = torch.Tensor() -- count non padding symbols
+    self.numSamples = 0
+
+    self.params, self.gradParams = 
+        model_utils.combine_all_parameters(self.encoder, 
+                                           self.decoder,
+                                           self.glimpse,
+                                           self.layer)
     self.maxNorm = config.maxNorm or 5
 
     -- use buffer to store all the information needed for forward/backward
@@ -54,12 +64,17 @@ function NMT:forward(input, target)
     - `target` : a tensor of next words
 
     Return:
-    - `logProb` : negative log-likelihood of the minibatch
+    - `logProb` : negative log-likelihood of the mini-batch
     --]]
 
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
-    return self.criterion:forward(logProb, target)
+    self.tot:resizeAs(target)
+    self.tot:ne(target, self.padidx)
+    self.numSamples = self.tot:sum()
+    local nll = self.criterion:forward(logProb, target)
+    return nll/ self.numSamples
+
 end
 
 function NMT:backward(input, target)
@@ -77,6 +92,8 @@ function NMT:backward(input, target)
     -- all good. Ready to backprop
 
     local gradLoss = self.criterion:backward(logProb, target)
+    gradLoss:div(self.numSamples)
+
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
     local gradDecoder = gradLayer[2] -- grad to decoder
     local gradGlimpse = self.glimpse:backward({outputEncoder, outputDecoder, reward}, gradLayer[1])
