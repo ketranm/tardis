@@ -20,13 +20,13 @@ Parameters:
 - `start` : index of time step at which we start computing the reward
 - `bptt` :  the maximum length of a sequence.
 - `vocab_size` : size of the dictionary
-- `eosidx` : the id of the end of sentence token. Symbols after
+- `eos_idx` : the id of the end of sentence token. Symbols after
     the first occurrence of eos (if any) are skipped.
-- `padidx` : the id of the padding token
+- `pad_idx` : the id of the padding token
 - `mbsz` : mini-batch size, which will be computed dynamically
 --]]
 
-function RewardFactory:__init(vocab_size, eosidx, unkidx, padidx)
+function RewardFactory:__init(vocab_size, eos_idx, unk_idx, pad_idx)
     --[[ Initiate the Factory class.
     NOTE: MIXER compute the reward at the end of an episode, this reward
         will be bproped to the sequence till the point where we start drawn
@@ -37,23 +37,23 @@ function RewardFactory:__init(vocab_size, eosidx, unkidx, padidx)
 
     Parameters:
     - `vocab_size` : integer, vocabulary size
-    - `eosidx` : integer, end of sentence index
-    - `unkidx` : integer, unknown index
-    - `padidx` : integer, index of padding symbol <pad>
+    - `eos_idx` : integer, end of sentence index
+    - `unk_idx` : integer, unknown index
+    - `pad_idx` : integer, index of padding symbol <pad>
     --]]
 
     self.start = 1
 
     self.vocab_size = vocab_size
-    self.eosidx = eosidx
-    self.padidx = padidx
+    self.eos_idx = eos_idx
+    self.pad_idx = pad_idx
 
-    if unkidx == nil then
+    if unk_idx == nil then
         print('dictionary does not have <unk>, ' ..
               'we are not skipping then while computing BLEU')
-        self.unkidx = -1
+        self.unk_idx = -1
     else
-        self.unkidx = unkidx
+        self.unk_idx = unk_idx
     end
 
     self.reward_val = torch.Tensor()
@@ -130,14 +130,9 @@ function RewardFactory:get_reward(target, input, tt)
 
     For that reason, here, target and input will be 2D tensors (mbsz, bptt)
 
-    --]]
-    --[[
     Parameters:
-    - `target` : table, each entry is a tensor of size mini-batch size
-        storing the reference at a certain time step
-    - `input` : table of tables, each table stores in its first entry the word
-        we have sampled, the second entry stores an estimate of cumulative reward,
-        and it is not used here
+    - `target` : tensor of (mbsz, bptt) dims
+    - `input` : tensor of (mbsz, bptt) dims
     - `tt` : integer, time step at which we wish to compute the reward
 
 
@@ -153,11 +148,8 @@ function RewardFactory:get_reward(target, input, tt)
 
     --]]
 
-    -- first attempt
-    -- It is OK to use 1D tensor for the reward values, we will duplicate it
-    -- to the number of generation steps
-    self.reward_val:fill(0)
 
+    self.reward_val:fill(0)
 
     function compute_bleu(target, input, tt, args, i)
         --[[ Compute BLEU scoring using multi-threads
@@ -169,14 +161,13 @@ function RewardFactory:get_reward(target, input, tt)
         - `i` : integer, thread i
         --]]
 
-        -- trying minimal modification
 
         local bptt = target:size(2) -- this will be the length of the target
         -- get local copy of class member variables
         local start = args.start
         local vocab_size = args.vocab_size
-        local eosidx = args.eosidx
-        local unkidx = args.unkidx
+        local eos_idx = args.eos_idx
+        local unk_idx = args.unk_idx
         local mbsz = args.mbsz
         local reward_val = args.reward_val
         -- this will be the length of each sample sequence (i.e. from Multinomial)
@@ -198,7 +189,7 @@ function RewardFactory:get_reward(target, input, tt)
 
 
             for step = 1, bptt do
-                if target[ss][step] == eosidx then
+                if target[ss][step] == eos_idx then
                     target_length = step - 1
                     break
                 end
@@ -206,7 +197,7 @@ function RewardFactory:get_reward(target, input, tt)
 
 
             for step = 1, bptt do
-                if input[ss][step] == eosidx then
+                if input[ss][step] == eos_idx then
                     input_length = step - 1
                     break
                 end
@@ -217,11 +208,11 @@ function RewardFactory:get_reward(target, input, tt)
             -- the length of the sequence to 0
             -- this should never happen in TARDIS
 
-            if input[ss][1] == padidx then
+            if input[ss][1] == pad_idx then
                 input_length = 0
             end
 
-            if target[ss][1] == padidx then
+            if target[ss][1] == pad_idx then
                 target_length = 0
             end
 
@@ -281,7 +272,7 @@ function RewardFactory:get_reward(target, input, tt)
                     counts_target[nn] = evals.get_counts(
                         targett:narrow(1, curr_offs,
                                        eff_seq_length_target - curr_offs + 1),
-                        nn, vocab_size, unkidx)
+                        nn, vocab_size, unk_idx)
 
                     score[nn] = evals.compute_score(
                                     counts_input[nn], counts_target[nn],
@@ -315,12 +306,12 @@ function RewardFactory:get_reward(target, input, tt)
     self.inputt:resize(bptt - self.start + 1)
     self.targett:resize(bptt - self.start + 1)
     self.reset:resize(mbsz)
-    self.target:resize(target):copy(target)
-    self.input:resize(input):copy(input)
+    self.target:resizeAs(target):copy(target)
+    self.input:resizeAs(input):copy(input)
 
     local args = {start = self.start, vocab_size = self.vocab_size,
-                eosidx = self.eosidx,
-                unkidx = self.unkidx,
+                eos_idx = self.eos_idx,
+                unk_idx = self.unk_idx,
                 mbsz = mbsz, reward_val = self.reward_val,
                 inputt = self.inputt, targett = self.targett,
                 nthreads = self.nthreads, order = self.order,
@@ -335,10 +326,6 @@ function RewardFactory:get_reward(target, input, tt)
 end
 
 function RewardFactory:num_samples(target, input)
-    -- we do not do padding, this code needs to be rewritten
-    local padidx = -1
-    self.reset:ne(target[self.start], padidx)
-    -- can actually return the batch size
-    -- return self.reset:numel()
+    self.reset:ne(target[self.start], self.pad_idx)
     return self.reset:sum()
 end
