@@ -35,7 +35,10 @@ function NMT:__init(config)
     self.gradEncoder = torch.Tensor()  -- always zeros
 
     -- get parameters and gradients for optimization
-    self.params, self.gradParams = model_utils.combine_all_parameters(self.encoder, self.decoder, self.layer)
+    self.params, self.gradParams =
+        model_utils.combine_all_parameters(self.encoder,
+                                           self.decoder,
+                                           self.layer)
     self.maxNorm = config.maxNorm or 5
     self.buffers = {}
 end
