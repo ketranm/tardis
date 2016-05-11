@@ -158,12 +158,20 @@ function RewardFactory:get_reward(target, input, tt)
     -- to the number of generation steps
     self.reward_val:fill(0)
 
-    -- get the bptt steps here
-    -- TODO: double check
-    local bptt = #input
 
     function compute_bleu(target, input, tt, args, i)
-        local bptt = target:size(1) -- this will be the length of the target
+        --[[ Compute BLEU scoring using multi-threads
+        Parameters:
+        - `target` : reference tensor (mbsz, bptt)
+        - `input` : generated tensor (mbsz, bptt)
+        - `tt` : integer, time step tt
+        - `args` : table, a copy of global configurations
+        - `i` : integer, thread i
+        --]]
+
+        -- trying minimal modification
+
+        local bptt = target:size(2) -- this will be the length of the target
         -- get local copy of class member variables
         local start = args.start
         local vocab_size = args.vocab_size
@@ -171,6 +179,7 @@ function RewardFactory:get_reward(target, input, tt)
         local unkidx = args.unkidx
         local mbsz = args.mbsz
         local reward_val = args.reward_val
+        -- this will be the length of each sample sequence (i.e. from Multinomial)
         local inputt = torch.Tensor(bptt - start + 1)
         local targett = torch.Tensor(bptt - start + 1)
         local nthreads = args.nthreads
@@ -180,29 +189,43 @@ function RewardFactory:get_reward(target, input, tt)
         local num_samples = math.floor(mbsz / nthreads)
         local first = (i-1) * num_samples + 1
         local last = (i < nthreads) and first + num_samples - 1 or mbsz
-        print('inside ' .. i)
-        print('bptt ' .. bptt)
+
         for ss = first, last do
             -- compute the length of the input and target sequences
             -- default values if <eos> is not found is bptt
             local target_length = bptt
             local input_length = bptt
 
+
             for step = 1, bptt do
-                if target[step][ss] == eosidx then
+                if target[ss][step] == eosidx then
                     target_length = step - 1
                     break
                 end
             end
 
+
             for step = 1, bptt do
-                if input[step][ss] == eosidx then
+                if input[ss][step] == eosidx then
                     input_length = step - 1
                     break
                 end
             end
 
-            -- note that TARDIS does not use padding, so we remove some code
+            -- some samples in the minibatch may just have
+            -- PAD token everywhere, in this care, just reset
+            -- the length of the sequence to 0
+            -- this should never happen in TARDIS
+
+            if input[ss][1] == padidx then
+                input_length = 0
+            end
+
+            if target[ss][1] == padidx then
+                target_length = 0
+            end
+
+
             assert(target_length >= 0 and input_length >= 0)
             -- we go up to 4-grams
             -- Note: if <eos> is detected before self.start then reward = 0
@@ -230,12 +253,13 @@ function RewardFactory:get_reward(target, input, tt)
 
                 -- copy data from tables to tensors
                 for step = 1, eff_seq_length_input do
-                    inputt[step] = input[start + step - 1 - math.min(n - 1, start - 1)][ss]
+                    inputt[step] = input[ss][
+                        start + step - 1 - math.min(n - 1, start - 1)]
                 end
 
                 for step = 1, eff_seq_length_target do
-                    targett[step] = target[
-                        start + step - 1 - math.min(n - 1, start - 1)][ss]
+                    targett[step] = target[ss][
+                        start + step - 1 - math.min(n - 1, start - 1)]
                 end
 
                 local counts_input = {}  -- store counts hashes for each n
@@ -250,11 +274,13 @@ function RewardFactory:get_reward(target, input, tt)
                         this requires to shift the offset to the left n-1 words
                     --]]
                     counts_input[nn] = evals.get_counts(
-                        inputt:narrow(1, curr_offs, eff_seq_length_input - curr_offs + 1),
+                        inputt:narrow(1, curr_offs,
+                                      eff_seq_length_input - curr_offs + 1),
                         nn, vocab_size)
 
                     counts_target[nn] = evals.get_counts(
-                        targett:narrow(1, curr_offs, eff_seq_length_target - curr_offs + 1),
+                        targett:narrow(1, curr_offs,
+                                       eff_seq_length_target - curr_offs + 1),
                         nn, vocab_size, unkidx)
 
                     score[nn] = evals.compute_score(
@@ -277,23 +303,20 @@ function RewardFactory:get_reward(target, input, tt)
     end
 
     -- resize vector here
-    assert(#target == #input and #target > 0)
-    local mbsz = target[1]:numel()
+    local mbsz = input:size(1)
+    local bptt = input:size(2)
 
     self.reward_val:resize(mbsz)
+
+    -- probably we should keep these vars for future use
+    -- we actually do not need to keep track of inputt
+    -- or do we?
+
     self.inputt:resize(bptt - self.start + 1)
     self.targett:resize(bptt - self.start + 1)
     self.reset:resize(mbsz)
-    self.target:resize(#target, mbsz)
-    self.input:resize(#input, mbsz)
-
-    -- sweet! Now we process
-    for cc = 1, #target do
-        self.target:select(1, cc):copy(target[cc])
-        self.input:select(1, cc):copy(input[cc][1])
-    end
-    print(self.input)
-    print(self.target)
+    self.target:resize(target):copy(target)
+    self.input:resize(input):copy(input)
 
     local args = {start = self.start, vocab_size = self.vocab_size,
                 eosidx = self.eosidx,
