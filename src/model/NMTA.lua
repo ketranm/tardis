@@ -53,6 +53,8 @@ function NMT:__init(config)
 
     -- use buffer to store all the information needed for forward/backward
     self.buffers = {}
+    self.output = torch.LongTensor()
+    self.prob = torch.Tensor()
 end
 
 function NMT:forward(input, target)
@@ -182,6 +184,67 @@ function NMT:stepDecoder(x)
     buffers.logProb = logProb
 
     return logProb
+end
+
+-- we also can sample from the decoder
+function NMT:sample(nsteps)
+    --[[ Sample `nsteps` from the model
+    Assume that we already run the encoder and started reading in <s> symbol,
+    so the buffers must contain log probability of the next words
+
+    Parameters:
+    - `nsteps` : integer, number of time steps
+
+    Returns:
+    - `output` : 2D tensor of sampled words
+    --]]
+    local buffers = self.buffers
+    local outputEncoder, prevState = buffers.outputDecoder, buffers.prevState
+    self.decoder:initState(prevState)
+
+    local logProb = buffers.logProb  -- from the previous prediction
+    assert(logProb ~= nil)
+    local batchSize = outputEncoder:size(1)
+    self.output:resize(batchSize, nsteps)
+
+    for i = 1, nsteps do
+        self.prob:resizeAs(logProb)
+        self.prob:copy(logProb)
+        self.prob:exp()
+        self.prob.multinomial(self.output[{{}, i}], self.prob, 1)
+        logProb = self:stepDecoder(self.output[{{},{i}}])
+    end
+    return self.output
+end
+
+function NMT:trainMixer(input, target, nsteps)
+    -- probably we should not put this code here
+    -- TODO: avoid passing data twice
+    local x0, y0 = input[2], target
+    local length = x:size(2)
+    assert(length > nsteps)
+    local length_xe = length - nsteps
+    local length_rf = nsteps
+
+    -- be careful with the indices
+    local x = input[2]:narrow(2, 1, length_xe):contiguous()
+    self:stepEncoder(input[1])
+    local logProb = self:stepDecoder(x)
+
+    -- back up
+    self.cache = {}
+
+    -- compute the loss
+    local sampled_x = self:sample(length_rf)
+    local y = torch.Tensor() -- copy here
+    -- compute reward
+
+
+    -- compute baseline regressor
+    --
+    -- compute interpolation loss
+
+    -- do bptt
 end
 
 function NMT:indexDecoderState(index)
