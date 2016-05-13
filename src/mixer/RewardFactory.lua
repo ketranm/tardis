@@ -148,9 +148,6 @@ function RewardFactory:get_reward(target, input, tt)
 
     --]]
 
-
-    self.reward_val:fill(0)
-
     function compute_bleu(target, input, tt, args, i)
         --[[ Compute BLEU scoring using multi-threads
         Parameters:
@@ -297,7 +294,7 @@ function RewardFactory:get_reward(target, input, tt)
     local mbsz = input:size(1)
     local bptt = input:size(2)
 
-    self.reward_val:resize(mbsz)
+    self.reward_val:resize(mbsz):fill(0)
 
     -- probably we should keep these vars for future use
     -- we actually do not need to keep track of inputt
