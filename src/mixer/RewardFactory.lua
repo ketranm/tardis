@@ -7,7 +7,7 @@ So we need to do it nice, slow and well documented
 
 require 'math'
 require 'xlua'
-local evals = require 'eval'
+local evals = require 'mixer.eval'
 local threads = require 'threads'
 
 local RewardFactory = torch.class('RewardFactory')
@@ -73,7 +73,7 @@ function RewardFactory:__init(vocab_size, eos_idx, unk_idx, pad_idx)
             i,
             function()
                 require 'xlua'
-                local evals = require 'eval'
+                local evals = require 'mixer.eval'
                 --require 'cutorch'
                 require 'math'
             end
@@ -208,11 +208,11 @@ function RewardFactory:get_reward(target, input, tt)
             -- the length of the sequence to 0
             -- this should never happen in TARDIS
 
-            if input[ss][1] == pad_idx then
+            if input[ss][tt] == pad_idx then
                 input_length = 0
             end
 
-            if target[ss][1] == pad_idx then
+            if target[ss][tt] == pad_idx then
                 target_length = 0
             end
 

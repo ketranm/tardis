@@ -7,6 +7,7 @@ url: http://www.aclweb.org/anthology/D15-1166
 require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
+require 'mixer.RewardFactory'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -37,9 +38,9 @@ function NMT:__init(config)
     self.layer:add(nn.LogSoftMax())
 
     local weights = torch.ones(config.trgVocabSize)
-    weights[config.padidx] = 0
+    weights[config.pad_idx] = 0
 
-    self.padidx = config.padidx
+    self.pad_idx = config.pad_idx
     self.criterion = nn.ClassNLLCriterion(weights, false)
     self.tot = torch.Tensor() -- count non padding symbols
     self.numSamples = 0
@@ -71,10 +72,10 @@ function NMT:forward(input, target)
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
     self.tot:resizeAs(target)
-    self.tot:ne(target, self.padidx)
+    self.tot:ne(target, self.pad_idx)
     self.numSamples = self.tot:sum()
     local nll = self.criterion:forward(logProb, target)
-    return nll/ self.numSamples
+    return nll / self.numSamples
 
 end
 
@@ -211,34 +212,72 @@ function NMT:sample(nsteps)
         self.prob:resizeAs(logProb)
         self.prob:copy(logProb)
         self.prob:exp()
-        self.prob.multinomial(self.output[{{}, i}], self.prob, 1)
+        self.prob.multinomial(self.output[{{}, {i}}], self.prob, 1)
         logProb = self:stepDecoder(self.output[{{},{i}}])
     end
     return self.output
+end
+
+function NMT:initMixer(config)
+    print('init mixer')
+    self.eos_idx = config.eos_idx
+    self.pad_idx = config.pad_idx
+    self.unk_idx = config.unk_idx
+    self.compute_reward =
+        RewardFactory(config.trgVocabSize,
+                      self.eos_idx,
+                      self.unk_idx,
+                      self.pad_idx)
+    self.compute_reward:training_mode()
 end
 
 function NMT:trainMixer(input, target, nsteps)
     -- probably we should not put this code here
     -- TODO: avoid passing data twice
     local x0, y0 = input[2], target
-    local length = x:size(2)
-    assert(length > nsteps)
-    local length_xe = length - nsteps
-    local length_rf = nsteps
+    local length = x0:size(2)
+    local length_xe = length - nsteps - 1
+    local length_rf = nsteps + 1
+    assert(length_xe > 0)  -- we have to start with <s>
 
     -- be careful with the indices
     local x = input[2]:narrow(2, 1, length_xe):contiguous()
     self:stepEncoder(input[1])
-    local logProb = self:stepDecoder(x)
+    self:stepDecoder(x)
+    -- now we start with 1 step
+    x = x0[{{}, {length_xe + 1}}]:contiguous()
+    self:stepDecoder(x)
+    --[[
+        inp : - - - - x  s1 s2
+        out : - - - - s1 s2 s3
+    --]]
 
     -- back up
-    self.cache = {}
-
     -- compute the loss
     local sampled_x = self:sample(length_rf)
-    local y = torch.Tensor() -- copy here
-    -- compute reward
 
+    x = x0:clone()
+    x[{{}, {length_xe + 2, -1}}] = sampled_x[{{}, {1, -2}}]
+
+    local y = y0:clone()
+
+    y[{{}, {length_xe + 1, -1}}] = sampled_x[{{}, {1, -1}}]
+    -- enforce <eos>?
+    -- TODO: we have to handle stuff with care here
+    -- since we use padding, some sentences have <eos> before length
+    -- and pad after that, in this case, we should add pad to the end
+    -- instead of <eos>.
+
+    -- The easiest way to get around with this is to not use padding
+    -- RewardFactory should take care of this
+
+
+    -- ok, we can compute the reward now
+
+    -- compute reward
+    for tt = length_xe + 1, length do
+        local rw = self.compute_reward:get_reward(y, y0, tt)
+    end
 
     -- compute baseline regressor
     --
