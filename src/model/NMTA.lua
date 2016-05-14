@@ -265,21 +265,19 @@ function NMT:trainMixer(input, target, skips)
     local src, trg_inpt = unpack(input)
     local length = trg_inpt:size(2)
     local mbsz = src:size(1)
-    --local x0, y0 = input[2], target
-    --local length = x0:size(2)
     local length_xe = skips - 1
     local length_rf = length - skips + 1
 
     -- be careful with the indices
     self:stepEncoder(input[1])
-    local x
     if length_xe > 0 then
-        x = trg_inpt:narrow(2, 1, length_xe):contiguous()
+        local x = trg_inpt:narrow(2, 1, length_xe) --:contiguous()
         self:stepDecoder(x)
     end
     -- now we start with one step
-    x = trg_inpt[{{}, {length_xe + 1}}]:contiguous()
+    local x = trg_inpt[{{}, {length_xe + 1}}] --:contiguous()
     self:stepDecoder(x)
+
     --[[ runing example
     skips = 4, length = 6
     length_rf = 6 - 4 + 1 = 3
@@ -287,18 +285,18 @@ function NMT:trainMixer(input, target, skips)
     out : - - - s1 s2 s3
     --]]
 
-    local x_sampled = self:sample(length_rf)
+    local sampled_w = self:sample(length_rf)
     -- TODO: if eos is found, should overwrite the next word to pad
 
-    x = trg_inpt:clone()
-    x[{{}, {length_xe + 2, -1}}] = x_sampled[{{}, {1, -2}}]
+    x = trg_inpt:clone() -- do we need to clone?
+    x[{{}, {length_xe + 2, -1}}] = sampled_w[{{}, {1, -2}}]
 
     local y = target:clone()
-
-    y[{{}, {length_xe + 1, -1}}] = x_sampled[{{}, {1, -1}}]
+    y[{{}, {length_xe + 1, -1}}] =  sampled_w
 
     self.criterion_rf:setSkips(skips)
-    local rf_loss = self.criterion_rf:forward(y, target)
+    local reward = self.criterion_rf:forward(y, target)
+    -- use the baseline
     local baseline = torch.Tensor(#x):fill(0) -- do not use now
     local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
 
@@ -307,20 +305,24 @@ function NMT:trainMixer(input, target, skips)
 
     -- it's time to pull out some tricks
     local y_xe = target:clone()
-    y_xe[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) -- use padding to ignore shit
+    -- use padding to ignore shit
+    y_xe[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) 
     y_xe = y_xe:view(-1)
     self.tot:ne(y_xe, self.pad_idx)
     self.numSamples = self.tot:sum()
     local nll = self.criterion_xe:forward(logProb, y_xe)
     nll = nll / self.numSamples
 
-    local grad_xent = self.criterion_xe:backward(logProb, y_xe)
-    -- normalized
-    grad_xent:div(self.numSamples)
-
+    -- Compute the gradient of MIXER
+    -- (1) take gradient of XENT
+    local gradLoss = self.criterion_xe:backward(logProb, y_xe)
+    -- (2) normalize it
+    gradLoss:div(self.numSamples)
+    -- (3) take gradient of REINFORCE
     self.drf:resize(mbsz, length, self.vocab_size):zero()
     self.drf:scatter(3, y:view(mbsz, -1, 1):long(), grad_rf[1]:view(mbsz, -1, 1))
-    grad_xent:add(self.drf:view(-1, self.vocab_size))
+    -- (4) add it to gradient of XENT
+    gradLoss:add(self.drf:view(-1, self.vocab_size))
 
     -- ok, ready to bprop
     self.gradParams:zero()
@@ -330,7 +332,6 @@ function NMT:trainMixer(input, target, skips)
     local context = buffers.context
     local logProb = buffers.logProb
 
-    local gradLoss = grad_xent
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
     local gradDecoder = gradLayer[2] -- grad to decoder
     local gradGlimpse =
@@ -345,7 +346,7 @@ function NMT:trainMixer(input, target, skips)
     local gradEncoder = gradGlimpse[1]
     self.encoder:backward(input[1], gradEncoder)
     self:update(1)
-    print(nll, rf_loss)
+    return nll, -reward  -- reward is negative (we are minimizing)
 end
 
 function NMT:indexDecoderState(index)
