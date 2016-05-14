@@ -8,6 +8,8 @@ require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
 require 'mixer.RewardFactory'
+require 'mixer.RFCriterion'
+require 'mixer.ClassNLLCriterionWeighted'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -223,67 +225,127 @@ function NMT:initMixer(config)
     self.eos_idx = config.eos_idx
     self.pad_idx = config.pad_idx
     self.unk_idx = config.unk_idx
-    self.compute_reward =
+    local reward_func =
         RewardFactory(config.trgVocabSize,
                       self.eos_idx,
                       self.unk_idx,
                       self.pad_idx)
-    self.compute_reward:training_mode()
+    self.criterion_rf = RFCriterion(reward_func,
+                        self.eos_idx, self.pad_idx, 1)
+    self.criterion_rf:training_mode()
+
+    -- setup xent criterion
+    self.wxent = 0.5  -- hard-coded for now
+    local weights = torch.ones(config.trgVocabSize)
+    weights[config.pad_idx] = 0
+    self.criterion_xe = nn.ClassNLLCriterionWeighted(
+        self.wxent, weights, false)
+    -- buffers
+    self.drf = torch.Tensor()
+    self.vocab_size = config.trgVocabSize
 end
 
-function NMT:trainMixer(input, target, nsteps)
+function NMT:overwrite_prediction(pred)
+    -- when previous token was eos or pad
+    -- pad is produced deterministically
+    local curr = pred:clone()
+    -- TODO
+end
+
+function NMT:trainMixer(input, target, skips)
+    --[[ train MIXER on one minibatch
+    Parameters:
+    - `input` : table of (src, target_history)
+    - `target` : next_target
+    - `skips` : integer, length of reference policy, ie. xent loss
+
+    --]]
     -- probably we should not put this code here
     -- TODO: avoid passing data twice
-    local x0, y0 = input[2], target
-    local length = x0:size(2)
-    local length_xe = length - nsteps - 1
-    local length_rf = nsteps + 1
-    assert(length_xe > 0)  -- we have to start with <s>
+    local src, trg_inpt = unpack(input)
+    local length = trg_inpt:size(2)
+    local mbsz = src:size(1)
+    --local x0, y0 = input[2], target
+    --local length = x0:size(2)
+    local length_xe = skips - 1
+    local length_rf = length - skips + 1
 
     -- be careful with the indices
-    local x = input[2]:narrow(2, 1, length_xe):contiguous()
     self:stepEncoder(input[1])
+    local x
+    if length_xe > 0 then
+        x = trg_inpt:narrow(2, 1, length_xe):contiguous()
+        self:stepDecoder(x)
+    end
+    -- now we start with one step
+    x = trg_inpt[{{}, {length_xe + 1}}]:contiguous()
     self:stepDecoder(x)
-    -- now we start with 1 step
-    x = x0[{{}, {length_xe + 1}}]:contiguous()
-    self:stepDecoder(x)
-    --[[
-        inp : - - - - x  s1 s2
-        out : - - - - s1 s2 s3
+    --[[ runing example
+    skips = 4, length = 6
+    length_rf = 6 - 4 + 1 = 3
+    inp : - - - x  s1 s2
+    out : - - - s1 s2 s3
     --]]
 
-    -- back up
-    -- compute the loss
-    local sampled_x = self:sample(length_rf)
+    local x_sampled = self:sample(length_rf)
+    -- TODO: if eos is found, should overwrite the next word to pad
 
-    x = x0:clone()
-    x[{{}, {length_xe + 2, -1}}] = sampled_x[{{}, {1, -2}}]
+    x = trg_inpt:clone()
+    x[{{}, {length_xe + 2, -1}}] = x_sampled[{{}, {1, -2}}]
 
-    local y = y0:clone()
+    local y = target:clone()
 
-    y[{{}, {length_xe + 1, -1}}] = sampled_x[{{}, {1, -1}}]
-    -- enforce <eos>?
-    -- TODO: we have to handle stuff with care here
-    -- since we use padding, some sentences have <eos> before length
-    -- and pad after that, in this case, we should add pad to the end
-    -- instead of <eos>.
+    y[{{}, {length_xe + 1, -1}}] = x_sampled[{{}, {1, -1}}]
 
-    -- The easiest way to get around with this is to not use padding
-    -- RewardFactory should take care of this
+    self.criterion_rf:setSkips(skips)
+    local rf_loss = self.criterion_rf:forward(y, target)
+    local baseline = torch.Tensor(#x):fill(0) -- do not use now
+    local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
 
+    self.buffers.prevState = self.encoder:lastState()
+    local logProb = self:stepDecoder(x)
 
-    -- ok, we can compute the reward now
+    -- it's time to pull out some tricks
+    local y_xe = target:clone()
+    y_xe[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) -- use padding to ignore shit
+    y_xe = y_xe:view(-1)
+    self.tot:ne(y_xe, self.pad_idx)
+    self.numSamples = self.tot:sum()
+    local nll = self.criterion_xe:forward(logProb, y_xe)
+    nll = nll / self.numSamples
 
-    -- compute reward
-    for tt = length_xe + 1, length do
-        local rw = self.compute_reward:get_reward(y, y0, tt)
-    end
+    local grad_xent = self.criterion_xe:backward(logProb, y_xe)
+    -- normalized
+    grad_xent:div(self.numSamples)
 
-    -- compute baseline regressor
-    --
-    -- compute interpolation loss
+    self.drf:resize(mbsz, length, self.vocab_size):zero()
+    self.drf:scatter(3, y:view(mbsz, -1, 1):long(), grad_rf[1]:view(mbsz, -1, 1))
+    grad_xent:add(self.drf:view(-1, self.vocab_size))
 
-    -- do bptt
+    -- ok, ready to bprop
+    self.gradParams:zero()
+    local buffers = self.buffers
+    local outputEncoder = buffers.outputEncoder
+    local outputDecoder = buffers.outputDecoder
+    local context = buffers.context
+    local logProb = buffers.logProb
+
+    local gradLoss = grad_xent
+    local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
+    local gradDecoder = gradLayer[2] -- grad to decoder
+    local gradGlimpse =
+        self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
+
+    gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place 
+
+    self.decoder:backward(input[2], gradDecoder)
+    -- initialize gradient from decoder
+    self.encoder:setGradState(self.decoder:getGradState())
+    -- backward to encoder
+    local gradEncoder = gradGlimpse[1]
+    self.encoder:backward(input[1], gradEncoder)
+    self:update(1)
+    print(nll, rf_loss)
 end
 
 function NMT:indexDecoderState(index)
