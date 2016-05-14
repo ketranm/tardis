@@ -252,7 +252,7 @@ function NMT:overwrite_prediction(pred)
     -- TODO
 end
 
-function NMT:trainMixer(input, target, skips)
+function NMT:trainMixer(input, target, skips, learningRate)
     --[[ train MIXER on one minibatch
     Parameters:
     - `input` : table of (src, target_history)
@@ -303,19 +303,20 @@ function NMT:trainMixer(input, target, skips)
     self.buffers.prevState = self.encoder:lastState()
     local logProb = self:stepDecoder(x)
 
-    -- it's time to pull out some tricks
-    local y_xe = target:clone()
-    -- use padding to ignore shit
-    y_xe[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) 
-    y_xe = y_xe:view(-1)
-    self.tot:ne(y_xe, self.pad_idx)
+    -- Overwrite target as we do not need it anymore
+    --local y_xe = target:clone()
+    -- use padding to ignore sampled words
+    target[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) 
+    target = target:view(-1)
+    self.tot:ne(target, self.pad_idx)
     self.numSamples = self.tot:sum()
-    local nll = self.criterion_xe:forward(logProb, y_xe)
+
+    local nll = self.criterion_xe:forward(logProb, target)
     nll = nll / self.numSamples
 
     -- Compute the gradient of MIXER
     -- (1) take gradient of XENT
-    local gradLoss = self.criterion_xe:backward(logProb, y_xe)
+    local gradLoss = self.criterion_xe:backward(logProb, target)
     -- (2) normalize it
     gradLoss:div(self.numSamples)
     -- (3) take gradient of REINFORCE
@@ -324,7 +325,8 @@ function NMT:trainMixer(input, target, skips)
     -- (4) add it to gradient of XENT
     gradLoss:add(self.drf:view(-1, self.vocab_size))
 
-    -- ok, ready to bprop
+
+    --------------   ok! ready to bprop  ------------------
     self.gradParams:zero()
     local buffers = self.buffers
     local outputEncoder = buffers.outputEncoder
@@ -345,7 +347,8 @@ function NMT:trainMixer(input, target, skips)
     -- backward to encoder
     local gradEncoder = gradGlimpse[1]
     self.encoder:backward(input[1], gradEncoder)
-    self:update(1)
+    self:update(learningRate)
+    
     return nll, -reward  -- reward is negative (we are minimizing)
 end
 
