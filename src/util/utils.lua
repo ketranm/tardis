@@ -127,5 +127,11 @@ function utils.reverse(t, dim)
     return t:index(dim, rev_idx)
 end
 
+function utils.scale_clip(v, max_norm)
+    local norm = v:norm()
+    if norm > max_norm then
+        v:div(norm/max_norm)
+    end
+end
 
 return utils
