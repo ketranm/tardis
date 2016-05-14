@@ -74,7 +74,7 @@ function RewardFactory:__init(vocab_size, eos_idx, unk_idx, pad_idx)
             function()
                 require 'xlua'
                 local evals = require 'mixer.eval'
-                --require 'cutorch'
+                require 'cutorch'
                 require 'math'
             end
          )
@@ -118,8 +118,9 @@ function RewardFactory:set_start(val)
     self.start = val
 end
 
-function RewardFactory:cuda()
-    self.reset = self.reset:cuda()
+function RewardFactory:type(tp)
+    self.reset = self.reset:type(tp)
+    self.dtype = tp
 end
 
 function RewardFactory:get_reward(target, input, tt)
@@ -319,7 +320,11 @@ function RewardFactory:get_reward(target, input, tt)
     end
 
     self.pool:synchronize()
-    return self.reward_val
+    local reward_val = self.reward_val
+    if self.dtype ~= 'torch.CudaTEnsor' then
+        reward_val = self.reward_val:type(self.dtype)
+    end
+    return reward_val
 end
 
 function RewardFactory:num_samples(target, input)

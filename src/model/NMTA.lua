@@ -235,12 +235,14 @@ function NMT:initMixer(config)
     self.pad_idx = config.pad_idx
     self.unk_idx = config.unk_idx
 
+    local dtype = self.params:type()
     -- setup xent criterion
     self.wxent = 0.5  -- hard-coded for now
     local weights = torch.ones(config.trgVocabSize)
     weights[config.pad_idx] = 0
     self.criterion_xe = nn.ClassNLLCriterionWeighted(
         self.wxent, weights, false)
+    self.criterion_xe:type(dtype)
     -- set up reinforce criterion
     local reward_func =
         RewardFactory(config.trgVocabSize,
@@ -250,6 +252,7 @@ function NMT:initMixer(config)
     self.criterion_rf = RFCriterion(reward_func,
                         self.eos_idx, self.pad_idx, 1)
     self.criterion_rf:setWeight(1 - self.wxent)
+    self.criterion_rf:type(dtype)
     self.criterion_rf:training_mode()
 
     -- should we setup the cumulative reward predictor here?
@@ -261,12 +264,13 @@ function NMT:initMixer(config)
     local crp = nn.Linear(config.hiddenSize, 1)
     crp.bias:fill(0.01)
     crp.weight:fill(0)
+    crp:type(dtype)
     self.crp = crp
     self.param_crp, self.grad_param_crp = crp:getParameters()
     -- TODO: we can train crp using Adadelta,
     -- it is more stable with adaptive learning rate method
     -- buffers
-    self.drf = torch.Tensor()
+    self.drf = torch.Tensor():type(dtype)
     self.vocab_size = config.trgVocabSize
 end
 
@@ -331,7 +335,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local pred_crw = self.crp:forward(state)
     local baseline = pred_crw:viewAs(x)
 
-    local reward = self.criterion_rf:forward({y, baseline}, target)    
+    local reward = self.criterion_rf:forward({y, baseline}, target)
     local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
     local grad_crp = grad_rf[2]
     -- error of the baseline
@@ -349,7 +353,6 @@ function NMT:trainMixer(input, target, skips, learningRate)
     target = target:view(-1)
     self.tot:ne(target, self.pad_idx)
     self.numSamples = self.tot:sum()
-
     local nll = self.criterion_xe:forward(logProb, target)
     nll = nll / self.numSamples
 
@@ -360,7 +363,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
     gradLoss:div(self.numSamples)
     -- (3) take gradient of REINFORCE
     self.drf:resize(mbsz, length, self.vocab_size):zero()
-    self.drf:scatter(3, y:view(mbsz, -1, 1):long(), grad_rf[1]:view(mbsz, -1, 1))
+    self.drf:scatter(3, y:view(mbsz, -1, 1), grad_rf[1]:view(mbsz, -1, 1))
     -- (4) add it to gradient of XENT
     gradLoss:add(self.drf:view(-1, self.vocab_size))
 

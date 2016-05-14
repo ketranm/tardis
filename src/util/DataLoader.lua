@@ -10,10 +10,10 @@ function DataLoader:__init(config)
     self._start_vocab = {self._bos, self._eos, self._unk, self._pad}
 
     -- just in case
-    self.bosidx = 1
-    self.eosidx = 2
-    self.unkidx = 3
-    self.padidx = 4
+    self.bos_idx = 1
+    self.eos_idx = 2
+    self.unk_idx = 3
+    self.pad_idx = 4
 
     local langs = {config.src, config.trg}
 
@@ -197,7 +197,10 @@ function DataLoader:text2Tensor(textFiles, tensorPrefix, shardSize, tracker)
 
         local srcTokens = stringx.split(source)
         local trgTokens = stringx.split(target)
-        local trgLength = #trgTokens + diff - (#trgTokens % diff)
+        -- if not using REINFORCE, uncomment the line bellow to speed up
+
+        --local trgLength = #trgTokens + diff - (#trgTokens % diff)
+        local trgLength = #trgTokens
         local bidx =  string.format('%d|%d', #srcTokens, trgLength)
 
         local token_idx, token

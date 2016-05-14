@@ -31,6 +31,7 @@ function RFCriterion:type(tp)
     self.gradInput[1] = self.gradInput[1]:type(tp)
     self.gradInput[2] = self.gradInput[2]:type(tp)
     self.buffer = self.buffer:type(tp)
+    self.reward_func:type(tp)
     return self
 end
 
@@ -55,10 +56,13 @@ function RFCriterion:updateOutput(input, target)
     self.reward:resize(mbsz, num_steps)
     self.cumreward:resize(mbsz, num_steps)
 
+    local input_cpu = input[1]:double()
+    local target_cpu = target:double()
+
     for tt = seq_length, self.skips, -1 do
         local shifted_tt = tt - self.skips + 1
         self.reward[{{}, {shifted_tt}}] =
-            self.reward_func:get_reward(target, input[1], tt)
+            self.reward_func:get_reward(target_cpu, input_cpu, tt)
 
             self.cumreward:select(2, shifted_tt):copy(
             self.reward:select(2, shifted_tt))
@@ -83,7 +87,7 @@ function RFCriterion:updateGradInput(input, target)
     for tt = seq_length, self.skips, -1 do
         local shifted_tt = tt - self.skips + 1
         self.gradInput[1]:select(2, tt):add(
-            input[2]:select(2, tt), 
+            input[2]:select(2, tt),
             -1, self.cumreward:select(2, shifted_tt))
     end
     self.gradInput[2]:copy(self.gradInput[1])
