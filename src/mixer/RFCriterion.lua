@@ -58,7 +58,7 @@ function RFCriterion:updateOutput(input, target)
     for tt = seq_length, self.skips, -1 do
         local shifted_tt = tt - self.skips + 1
         self.reward[{{}, {shifted_tt}}] =
-            self.reward_func:get_reward(target, input, tt)
+            self.reward_func:get_reward(target, input[1], tt)
 
             self.cumreward:select(2, shifted_tt):copy(
             self.reward:select(2, shifted_tt))
@@ -83,7 +83,7 @@ function RFCriterion:updateGradInput(input, target)
     for tt = seq_length, self.skips, -1 do
         local shifted_tt = tt - self.skips + 1
         self.gradInput[1]:select(2, tt):add(
-            input[2]:select(2, tt):squeeze(), 
+            input[2]:select(2, tt), 
             -1, self.cumreward:select(2, shifted_tt))
     end
     self.gradInput[2]:copy(self.gradInput[1])

@@ -10,6 +10,9 @@ local model_utils = require 'model.model_utils'
 require 'mixer.RewardFactory'
 require 'mixer.RFCriterion'
 require 'mixer.ClassNLLCriterionWeighted'
+require 'optim'
+
+local utils = require 'util.utils'
 
 local NMT, parent = torch.class('nn.NMT', 'nn.Module')
 
@@ -58,6 +61,11 @@ function NMT:__init(config)
     self.buffers = {}
     self.output = torch.LongTensor()
     self.prob = torch.Tensor()
+end
+
+function NMT:selectState()
+    -- get states that might be helpful for predicting reward
+    return self.layer:get(5).output
 end
 
 function NMT:forward(input, target)
@@ -189,7 +197,7 @@ function NMT:stepDecoder(x)
     return logProb
 end
 
--- we also can sample from the decoder
+-- REINFORCE training Neural Machine Translation
 function NMT:sample(nsteps)
     --[[ Sample `nsteps` from the model
     Assume that we already run the encoder and started reading in <s> symbol,
@@ -222,17 +230,10 @@ end
 
 function NMT:initMixer(config)
     print('init mixer')
+
     self.eos_idx = config.eos_idx
     self.pad_idx = config.pad_idx
     self.unk_idx = config.unk_idx
-    local reward_func =
-        RewardFactory(config.trgVocabSize,
-                      self.eos_idx,
-                      self.unk_idx,
-                      self.pad_idx)
-    self.criterion_rf = RFCriterion(reward_func,
-                        self.eos_idx, self.pad_idx, 1)
-    self.criterion_rf:training_mode()
 
     -- setup xent criterion
     self.wxent = 0.5  -- hard-coded for now
@@ -240,6 +241,30 @@ function NMT:initMixer(config)
     weights[config.pad_idx] = 0
     self.criterion_xe = nn.ClassNLLCriterionWeighted(
         self.wxent, weights, false)
+    -- set up reinforce criterion
+    local reward_func =
+        RewardFactory(config.trgVocabSize,
+                      self.eos_idx,
+                      self.unk_idx,
+                      self.pad_idx)
+    self.criterion_rf = RFCriterion(reward_func,
+                        self.eos_idx, self.pad_idx, 1)
+    self.criterion_rf:setWeight(1 - self.wxent)
+    self.criterion_rf:training_mode()
+
+    -- should we setup the cumulative reward predictor here?
+    -- lets do it first, think later
+    -- this is different from the original MIXER code
+    -- we create only one instance of the regressor
+    -- and we use it though different time steps
+    -- I think it does not make much different
+    local crp = nn.Linear(config.hiddenSize, 1)
+    crp.bias:fill(0.01)
+    crp.weight:fill(0)
+    self.crp = crp
+    self.param_crp, self.grad_param_crp = crp:getParameters()
+    -- TODO: we can train crp using Adadelta,
+    -- it is more stable with adaptive learning rate method
     -- buffers
     self.drf = torch.Tensor()
     self.vocab_size = config.trgVocabSize
@@ -294,17 +319,31 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local y = target:clone()
     y[{{}, {length_xe + 1, -1}}] =  sampled_w
 
-    self.criterion_rf:setSkips(skips)
-    local reward = self.criterion_rf:forward(y, target)
-    -- use the baseline
-    local baseline = torch.Tensor(#x):fill(0) -- do not use now
-    local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
-
+    -- roll in the RNNs
     self.buffers.prevState = self.encoder:lastState()
     local logProb = self:stepDecoder(x)
 
+    -- compute reinforce loss and gradient
+    self.criterion_rf:setSkips(skips)
+
+    -- using a baseline to reduce variance
+    local state = self:selectState()
+    local pred_crw = self.crp:forward(state)
+    local baseline = pred_crw:viewAs(x)
+
+    local reward = self.criterion_rf:forward({y, baseline}, target)    
+    local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
+    local grad_crp = grad_rf[2]
+    -- error of the baseline
+    local crp_err = grad_crp:norm()
+
+    self.grad_param_crp:zero()
+    self.crp:backward(state, grad_crp:view(-1, 1))
+    utils.scale_clip(self.grad_param_crp, 5)
+    local lr = learningRate * 0.001
+    self.param_crp:add(-lr, self.grad_param_crp)
+
     -- Overwrite target as we do not need it anymore
-    --local y_xe = target:clone()
     -- use padding to ignore sampled words
     target[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) 
     target = target:view(-1)
@@ -348,8 +387,9 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local gradEncoder = gradGlimpse[1]
     self.encoder:backward(input[1], gradEncoder)
     self:update(learningRate)
-    
-    return nll, -reward  -- reward is negative (we are minimizing)
+
+    -- reward is negative (we are minimizing)
+    return {nll, -reward, crp_err}
 end
 
 function NMT:indexDecoderState(index)
