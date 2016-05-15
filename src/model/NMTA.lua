@@ -236,6 +236,7 @@ function NMT:initMixer(config)
     self.unk_idx = config.unk_idx
 
     local dtype = self.params:type()
+
     -- setup xent criterion
     self.wxent = 0.5  -- hard-coded for now
     local weights = torch.ones(config.trgVocabSize)
@@ -267,6 +268,8 @@ function NMT:initMixer(config)
     crp:type(dtype)
     self.crp = crp
     self.param_crp, self.grad_param_crp = crp:getParameters()
+    -- update the baseline at a slow pace
+    self.weight_predictive_reward = 1e-6
     -- TODO: we can train crp using Adadelta,
     -- it is more stable with adaptive learning rate method
     -- buffers
@@ -338,13 +341,16 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local reward = self.criterion_rf:forward({y, baseline}, target)
     local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
     local grad_crp = grad_rf[2]
+
     -- error of the baseline
     local crp_err = grad_crp:norm()
+    local num_generated_words = mbsz * length_rf
+    crp_err = crp_err^2 / num_generated_words
 
     self.grad_param_crp:zero()
     self.crp:backward(state, grad_crp:view(-1, 1))
     utils.scale_clip(self.grad_param_crp, 5)
-    local lr = learningRate * 0.001
+    local lr = learningRate * self.weight_predictive_reward
     self.param_crp:add(-lr, self.grad_param_crp)
 
     -- Overwrite target as we do not need it anymore
@@ -392,7 +398,11 @@ function NMT:trainMixer(input, target, skips, learningRate)
     self:update(learningRate)
 
     -- reward is negative (we are minimizing)
-    return {nll, -reward, crp_err}
+    -- the key to hapiness is to have low expectations
+    -- so we return the true numbers
+    return {nll / self.wxent,
+            -reward / (1 - self.wxent),
+            crp_err}
 end
 
 function NMT:indexDecoderState(index)
