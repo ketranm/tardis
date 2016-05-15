@@ -13,13 +13,14 @@ function RFCriterion:__init(reward_func, eos_idx, pad_idx, skips,
     self.reward = torch.Tensor()
     self.cumreward = torch.Tensor()
     self.skips = (skips == nil) and 1 or skips
-    self.weight_predictive_reward = 
+    --[[
+    self.weight_predictive_reward =
         (weight_predictive_reward == nil) and 0.01 or weight_predictive_reward
+    --]]
     self.weight = (weight == nil) and 1 or weight
     self.normalizing_coeff = 1
     self.eos_idx = eos_idx
     self.pad_idx = pad_idx
-    self.buffer = torch.Tensor()
     self.gradInput = {torch.Tensor(), torch.Tensor()}
 end
 
@@ -30,7 +31,6 @@ function RFCriterion:type(tp)
     self.cumreward = self.cumreward:type(tp)
     self.gradInput[1] = self.gradInput[1]:type(tp)
     self.gradInput[2] = self.gradInput[2]:type(tp)
-    self.buffer = self.buffer:type(tp)
     self.reward_func:type(tp)
     return self
 end
@@ -53,6 +53,7 @@ function RFCriterion:updateOutput(input, target)
     --]]
     local mbsz, seq_length = target:size(1), target:size(2)
     local num_steps = seq_length - self.skips + 1
+
     self.reward:resize(mbsz, num_steps)
     self.cumreward:resize(mbsz, num_steps)
 
@@ -73,9 +74,9 @@ function RFCriterion:updateOutput(input, target)
     end
 
     -- normalize
-    self.buffer:resizeAs(self.cumreward)
-    self.buffer:ne(self.cumreward, 0)
-    self.normalizing_coeff = self.weight / self.buffer:sum()
+    local num_samples = self.cumreward:numel()
+    assert(num_samples > 0, 'number of samples must not be zero')
+    self.normalizing_coeff = self.weight / num_samples
     self.output = -self.cumreward:sum() * self.normalizing_coeff
     return self.output
 end
@@ -92,7 +93,7 @@ function RFCriterion:updateGradInput(input, target)
     end
     self.gradInput[2]:copy(self.gradInput[1])
     self.gradInput[1]:mul(self.normalizing_coeff)
-    self.gradInput[2]:mul(self.weight_predictive_reward)
+    --self.gradInput[2]:mul(self.weight_predictive_reward)
     return self.gradInput
 end
 
