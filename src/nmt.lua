@@ -2,7 +2,6 @@ require 'torch'
 require 'nn'
 
 -- make sure this script can be run from any folder
--- package.path = debug.getinfo(1,"S").source:match[[^@?(.*[\/])[^\/]-$]] .."?.lua;".. package.path
 
 require 'util.DataLoader'
 require 'model.NMTA' -- use attention by default
@@ -29,7 +28,7 @@ io:flush()
 
 local loader = DataLoader(config)
 
-config.padidx = loader.padidx
+config.pad_idx = loader.pad_idx
 
 local model = nn.NMT(config)
 -- overwrite config
@@ -52,6 +51,10 @@ function prepro(batch)
         source = source:float():cuda()
         prevTrg = prevTrg:float():cuda()
         nextTrg = nextTrg:float():cuda()
+    else
+        source = source:double()
+        prevTrg = prevTrg:double()
+        nextTrg = nextTrg:double()
     end
     return source, prevTrg, nextTrg
 end
@@ -59,7 +62,7 @@ end
 function train()
     local exp = math.exp
     for epoch = 1,config.maxEpoch do
-        loader:read_train()
+        loader:readTrain()
         model:training()
         local nll = 0
         local nbatches = loader:nbatches()
@@ -80,7 +83,7 @@ function train()
             config.learningRate = config.learningRate * config.decayRate
         end
 
-        loader:read_valid()
+        loader:readValid()
         model:evaluate()
         local valid_nll = 0
         local nbatches = loader:nbatches()

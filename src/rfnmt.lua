@@ -40,14 +40,10 @@ if config.gpuid >= 0 then
     model:cuda()
 end
 
-
-
 -- prepare data
 function prepro(batch)
     local source, target = unpack(batch)
     local trgLength = target:size(2)
-    --print('target\n',target)
-    -- make contiguous
     source = source:contiguous()
     prevTrg = target:narrow(2,1,trgLength-1):contiguous()
     nextTrg = target:narrow(2,2,trgLength-1):contiguous()
@@ -63,69 +59,54 @@ function prepro(batch)
     return source, prevTrg, nextTrg
 end
 
-
--- build cumulative reward predictor
-
 function train()
     local exp = math.exp
+    local delta = 3
+    local rf_epoch = 5
+    model:training()
+    model:initMixer(config)
     for epoch = 1,config.maxEpoch do
-        loader:readTrain()
-        model:training()
-        model:initMixer(config)
-        local nll = 0
-        local reward = 0
-        local crp_err = 0
-        local nbatches = loader:nbatches()
-        local n = 0
-        --print('number of batches: ', nbatches)
-        for i = 1, nbatches do
-            local src, trg, nextTrg = prepro(loader:nextBatch())
-            -- test rf here
-            local trgLength = trg:size(2)
-            local delta = 3
-            local skips = trgLength - delta
+        for k = 1, rf_epoch do
+            loader:readTrain()
+        
+            local nll = 0
+            local reward = 0
+            local crp_err = 0
+            local nbatches = loader:nbatches()
+            local n = 0
+            for i = 1, nbatches do
+                local src, trg, nextTrg = prepro(loader:nextBatch())
+                local trgLength = trg:size(2)
+                local skips = trgLength - delta
 
-            local batchSize = src:size(1)
-            if skips > 1 then
-                local res = model:trainMixer({src, trg}, nextTrg, skips, 1)
-                local _nil, _rw, _crp_err = unpack(res)
-                nll = nll + _nil
-                reward = reward + _rw
-                crp_err = crp_err + _crp_err
-                n = n + 1
+                if skips > 1 then
+                    local res = model:trainMixer({src, trg}, nextTrg, skips, 1)
+                    local _nil, _rw, _crp_err = unpack(res)
+                    nll = nll + _nil
+                    reward = reward + _rw
+                    crp_err = crp_err + _crp_err
+                    n = n + 1
+                end
+                if n % config.reportEvery == 1 then
+                    local msg = 
+                    string.format('epoch = %d xent = %.4f reward = %.7f  mse err = %.7f',
+                                   epoch, exp(nll/n), reward/n, crp_err/n)
+                    print(msg)
+                    xlua.progress(i, nbatches)
+                    collectgarbage()
+                end
             end
-            if n % config.reportEvery == 0 then
-                local msg = string.format(
-                                'epoch = %d xent = %.4f reward = %.7f  mse err = %.7f',
-                                epoch, exp(nll/n), reward/n, crp_err/n)
-                print(msg)
-                xlua.progress(i, nbatches)
-                collectgarbage()
+
+            if epoch > config.decayAfter then
+                config.learningRate = config.learningRate * config.decayRate
             end
+
+            local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", config.modelDir, epoch, crp_err/n)
+            paths.mkdir(paths.dirname(checkpoint))
+            print('save model to: ' .. checkpoint)
+            print('learningRate: ', config.learningRate)
+            model:save(checkpoint)
         end
-
-        if epoch > config.decayAfter then
-            config.learningRate = config.learningRate * config.decayRate
-        end
-
-        loader:readValid()
-        model:evaluate()
-        local valid_nll = 0
-        local nbatches = loader:nbatches()
-        for i = 1, nbatches do
-            local src, trg, nextTrg = prepro(loader:nextBatch())
-            valid_nll = valid_nll + model:forward({src, trg}, nextTrg:view(-1))
-            if i % 50 == 0 then collectgarbage() end
-        end
-
-        prev_valid_nll = valid_nll
-        print(string.format('epoch %d\t valid perplexity = %.4f', epoch, exp(valid_nll/nbatches)))
-        local checkpoint = string.format("%s/tardis_epoch_%d_%.4f.t7", config.modelDir, epoch, valid_nll/nbatches)
-        paths.mkdir(paths.dirname(checkpoint))
-        print('save model to: ' .. checkpoint)
-        print('learningRate: ', config.learningRate)
-        model:save(checkpoint)
-
     end
 end
 
