@@ -50,7 +50,7 @@ function NMT:__init(config)
     self.tot = torch.Tensor() -- count non padding symbols
     self.numSamples = 0
 
-    self.params, self.gradParams = 
+    self.params, self.gradParams =
         model_utils.combine_all_parameters(self.encoder,
                                            self.decoder,
                                            self.glimpse,
@@ -111,7 +111,7 @@ function NMT:backward(input, target)
     local gradGlimpse =
         self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
 
-    gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place 
+    gradDecoder:add(gradGlimpse[2]) -- accumulate gradient in-place
 
     self.decoder:backward(input[2], gradDecoder)
     -- initialize gradient from decoder
@@ -269,12 +269,26 @@ function NMT:initMixer(config)
     self.crp = crp
     self.param_crp, self.grad_param_crp = crp:getParameters()
     -- update the baseline at a slow pace
-    self.weight_predictive_reward = 1e-6
-    -- TODO: we can train crp using Adadelta,
+    -- self.weight_predictive_reward = 1e-6
+    -- configuration and state for optim
     -- it is more stable with adaptive learning rate method
+    self.crp_cfg = {}
+    self.crp_sta = {}
     -- buffers
     self.drf = torch.Tensor():type(dtype)
     self.vocab_size = config.trgVocabSize
+end
+
+function NMT:save_crp(fname)
+    -- this is useful for long training
+    self.grad_param_crp:zero()
+    local crp = {self.crp, self.crp_cfg, self.crp_sta}
+    torch.save(fname, crp)
+end
+
+function NMT:load_crp(fname)
+    local crp = torch.load(fname)
+    self.crp, self.crp_cfg, self.crp_sta = unpack(crp)
 end
 
 function NMT:overwrite_prediction(pred)
@@ -285,7 +299,7 @@ function NMT:overwrite_prediction(pred)
 end
 
 function NMT:trainMixer(input, target, skips, learningRate)
-    --[[ train MIXER on one minibatch
+    --[[ train MIXER on one mini-batch
     Parameters:
     - `input` : table of (src, target_history)
     - `target` : next_target
@@ -343,19 +357,32 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local grad_crp = grad_rf[2]
 
     -- error of the baseline
-    local crp_err = grad_crp:norm()
-    local num_generated_words = mbsz * length_rf
-    crp_err = crp_err^2 / num_generated_words
+    --local crp_err = grad_crp:norm()
+    --local num_generated_words = mbsz * length_rf
+    --crp_err = crp_err^2 / num_generated_words
 
-    self.grad_param_crp:zero()
-    self.crp:backward(state, grad_crp:view(-1, 1))
-    utils.scale_clip(self.grad_param_crp, 5)
-    local lr = learningRate * self.weight_predictive_reward
-    self.param_crp:add(-lr, self.grad_param_crp)
+    --self.grad_param_crp:zero()
+    --self.crp:backward(state, grad_crp:view(-1, 1))
+    -- use Adadelta to optimize the baseline regressor
+    local feval = function(x)
+        self.grad_param_crp:zero()
+        local crp_err = grad_crp:norm()
+        local num_generated_words = mbsz * length_rf
+        crp_err = crp_err^1 / num_generated_words
+
+        self.crp:backward(state, grad_crp:view(-1, 1))
+        return crp_err, self.grad_param_crp
+    end
+
+    local _, fx = optim.adadelta(feval, self.param_crp, self.crp_cfg, self.crp_sta)
+    local crp_err = fx[1]
+    --utils.scale_clip(self.grad_param_crp, 5)
+    --local lr = learningRate * self.weight_predictive_reward
+    --self.param_crp:add(-lr, self.grad_param_crp)
 
     -- Overwrite target as we do not need it anymore
     -- use padding to ignore sampled words
-    target[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx) 
+    target[{{}, {length_xe + 1, -1}}]:fill(self.pad_idx)
     target = target:view(-1)
     self.tot:ne(target, self.pad_idx)
     self.numSamples = self.tot:sum()
@@ -387,7 +414,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local gradGlimpse =
         self.glimpse:backward({outputEncoder, outputDecoder}, gradLayer[1])
 
-    gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place 
+    gradDecoder:add(gradGlimpse[2]) -- accummulate gradient in-place
 
     self.decoder:backward(input[2], gradDecoder)
     -- initialize gradient from decoder
