@@ -343,8 +343,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
     --]]
 
     local sampled_w = self:sample(length_rf)
-    self:padify(sampled_w)
-    -- TODO: if eos is found, should overwrite the next word to pad
+    self:padify(sampled_w) -- padding when eos is found
 
     x = trg_inpt:clone() -- do we need to clone?
     x[{{}, {length_xe + 2, -1}}] = sampled_w[{{}, {1, -2}}]
@@ -363,6 +362,9 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local state = self:selectState()
     local pred_crw = self.crp:forward(state)
     local baseline = pred_crw:viewAs(x)
+    -- when pad is found, the baseline should predict zero
+    -- otherwise, shit happens
+    baseline:cmul(x:ne(self.pad_idx))
 
     local reward = self.criterion_rf:forward({y, baseline}, target)
     local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
