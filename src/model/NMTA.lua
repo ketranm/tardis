@@ -289,11 +289,24 @@ function NMT:load_crp(fname)
     self.crp, self.crp_cfg, self.crp_sta = unpack(crp)
 end
 
-function NMT:overwrite_prediction(pred)
+function NMT:padify(pred)
     -- when previous token was eos or pad
     -- pad is produced deterministically
-    local curr = pred:clone()
-    -- TODO
+    local mbsz, length = pred:size(1), pred:size(2)
+    local mask1 = torch.Tensor(mbsz):typeAs(pred)
+    local mask2 = torch.Tensor(mbsz):typeAs(pred)
+    for tt = 2, length do
+        torch.eq(mask1, pred[{{},tt - 1}], self.eos_idx)
+        torch.eq(mask2, pred[{{},tt - 1}], self.pad_idx)
+        mask1:add(mask2)
+ 
+        torch.ne(mask2, mask1, 1) -- negate
+        mask2:cmul(pred[{{}, tt}])
+        mask1:mul(self.pad_idx)
+        mask1:add(mask2)
+        pred[{{}, tt}]:copy(mask1)
+    end
+    return pred
 end
 
 function NMT:trainMixer(input, target, skips, learningRate)
@@ -330,6 +343,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
     --]]
 
     local sampled_w = self:sample(length_rf)
+    self:padify(sampled_w)
     -- TODO: if eos is found, should overwrite the next word to pad
 
     x = trg_inpt:clone() -- do we need to clone?
@@ -359,7 +373,7 @@ function NMT:trainMixer(input, target, skips, learningRate)
         self.grad_param_crp:zero()
         local crp_err = grad_crp:norm()
         local num_generated_words = mbsz * length_rf
-        crp_err = crp_err^1 / num_generated_words
+        crp_err = crp_err^2 / num_generated_words
 
         self.crp:backward(state, grad_crp:view(-1, 1))
         return crp_err, self.grad_param_crp
