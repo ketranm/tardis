@@ -268,8 +268,6 @@ function NMT:initMixer(config)
     crp:type(dtype)
     self.crp = crp
     self.param_crp, self.grad_param_crp = crp:getParameters()
-    -- update the baseline at a slow pace
-    -- self.weight_predictive_reward = 1e-6
     -- configuration and state for optim
     -- it is more stable with adaptive learning rate method
     self.crp_cfg = {}
@@ -356,13 +354,6 @@ function NMT:trainMixer(input, target, skips, learningRate)
     local grad_rf  = self.criterion_rf:backward({y, baseline}, target)
     local grad_crp = grad_rf[2]
 
-    -- error of the baseline
-    --local crp_err = grad_crp:norm()
-    --local num_generated_words = mbsz * length_rf
-    --crp_err = crp_err^2 / num_generated_words
-
-    --self.grad_param_crp:zero()
-    --self.crp:backward(state, grad_crp:view(-1, 1))
     -- use Adadelta to optimize the baseline regressor
     local feval = function(x)
         self.grad_param_crp:zero()
@@ -376,9 +367,6 @@ function NMT:trainMixer(input, target, skips, learningRate)
 
     local _, fx = optim.adadelta(feval, self.param_crp, self.crp_cfg, self.crp_sta)
     local crp_err = fx[1]
-    --utils.scale_clip(self.grad_param_crp, 5)
-    --local lr = learningRate * self.weight_predictive_reward
-    --self.param_crp:add(-lr, self.grad_param_crp)
 
     -- Overwrite target as we do not need it anymore
     -- use padding to ignore sampled words
