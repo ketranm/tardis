@@ -74,7 +74,7 @@ function RewardFactory:__init(vocab_size, eos_idx, unk_idx, pad_idx)
             function()
                 require 'xlua'
                 local evals = require 'mixer.eval'
-                require 'cutorch'
+                --require 'cutorch'
                 require 'math'
             end
          )
@@ -148,7 +148,6 @@ function RewardFactory:get_reward(target, input, tt)
     (so effectively we do not assume that input and target have the same length).
 
     --]]
-
     function compute_bleu(target, input, tt, args, i)
         --[[ Compute BLEU scoring using multi-threads
         Parameters:
@@ -185,14 +184,12 @@ function RewardFactory:get_reward(target, input, tt)
             local target_length = bptt
             local input_length = bptt
 
-
             for step = 1, bptt do
                 if target[ss][step] == eos_idx then
                     target_length = step - 1
                     break
                 end
             end
-
 
             for step = 1, bptt do
                 if input[ss][step] == eos_idx then
@@ -213,7 +210,6 @@ function RewardFactory:get_reward(target, input, tt)
             if target[ss][tt] == pad_idx then
                 target_length = 0
             end
-
 
             assert(target_length >= 0 and input_length >= 0)
             -- we go up to 4-grams
@@ -321,7 +317,7 @@ function RewardFactory:get_reward(target, input, tt)
 
     self.pool:synchronize()
     local reward_val = self.reward_val
-    if self.dtype ~= 'torch.CudaTEnsor' then
+    if self.dtype == 'torch.CudaTensor' then
         reward_val = self.reward_val:type(self.dtype)
     end
     return reward_val
