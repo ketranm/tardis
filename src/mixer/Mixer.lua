@@ -49,7 +49,7 @@ end
 
 
 function Mixer:save(fname)
-    local data = {self.net.params, self.wcrp
+    local data = {self.net.params, self.wcrp,
                   self.crp_cfg, self.crp_sta}
     torch.save(fname, model)
 end
@@ -140,11 +140,12 @@ function Mixer:trainOneBatch(input, target, skips, learning_rate)
         crp_err = crp_err^2 / nsamples
 
         self.crp:backward(state, grad_crp:view(-1, 1))
+        self.dwcrp:mul(0.01) -- update at lower rate
         return crp_err, self.dwcrp
     end
 
     -- optimize this shit
-    local _, fx = optim.adadelta(feval, self.wcrp, self.crp_cfg, self.crp_sta)
+    local _, fx = optim.adagrad(feval, self.wcrp, self.crp_cfg, self.crp_sta)
     local crp_err = fx[1]
 
     -- overwrite target as we do not need it anymore

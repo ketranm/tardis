@@ -7,10 +7,6 @@ url: http://www.aclweb.org/anthology/D15-1166
 require 'model.Transducer'
 require 'model.GlimpseDot'
 local model_utils = require 'model.model_utils'
-require 'mixer.RewardFactory'
-require 'mixer.RFCriterion'
-require 'mixer.ClassNLLCriterionWeighted'
-require 'optim'
 
 local utils = require 'util.utils'
 
