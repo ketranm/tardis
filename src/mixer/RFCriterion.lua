@@ -75,9 +75,9 @@ function RFCriterion:updateOutput(input, target)
 
     -- normalize
     local num_samples = self.cumreward:numel()
-    assert(num_samples > 0, 'number of samples must not be zero')
-    self.normalizing_coeff = self.weight / num_samples
-    self.output = -self.cumreward:sum() * self.normalizing_coeff
+    assert(num_samples > 0, 'number of samples must not be zeros')
+    self.normalizing_coeff = self.weight / (self.sizeAverage and num_samples or 1)
+    self.output = -self.cumreward:sum() / num_samples
     return self.output
 end
 

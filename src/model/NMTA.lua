@@ -41,6 +41,7 @@ function NMT:__init(config)
     local weights = torch.ones(config.trgVocabSize)
     weights[config.pad_idx] = 0
 
+    self.sizeAverage = false
     self.pad_idx = config.pad_idx
     self.criterion = nn.ClassNLLCriterion(weights, false)
     self.tot = torch.Tensor() -- count non padding symbols
@@ -101,7 +102,8 @@ function NMT:backward(input, target, gradOutput)
     -- by default, we use Cross-Entropy loss
     if not gradLoss then
         gradLoss = self.criterion:backward(logProb, target)
-        gradLoss:div(self.numSamples)
+        local norm_coeff = 1/ (self.sizeAverage and self.numSamples or 1)
+        gradLoss:mul(norm_coeff)
     end
 
     local gradLayer = self.layer:backward({context, outputDecoder}, gradLoss)
