@@ -7,6 +7,7 @@ require 'mixer.RewardFactory'
 require 'mixer.RFCriterion'
 require 'nn'
 require 'optim'
+local utils = require 'util.utils'
 
 local Mixer = torch.class('Mixer')
 
@@ -140,12 +141,13 @@ function Mixer:trainOneBatch(input, target, skips, learning_rate)
         crp_err = crp_err^2 / nsamples
 
         self.crp:backward(state, grad_crp:view(-1, 1))
-        self.dwcrp:mul(0.01) -- update at lower rate
+        --self.dwcrp:mul(0.001 * learning_rate) -- update at lower rate
+        --utils.scale_clip(self.dwcrp, 0.1)
         return crp_err, self.dwcrp
     end
 
     -- optimize this shit
-    local _, fx = optim.adagrad(feval, self.wcrp, self.crp_cfg, self.crp_sta)
+    local _, fx = optim.adam(feval, self.wcrp, self.crp_cfg, self.crp_sta)
     local crp_err = fx[1]
 
     -- overwrite target as we do not need it anymore
@@ -154,6 +156,7 @@ function Mixer:trainOneBatch(input, target, skips, learning_rate)
     target = target:view(-1)
 
     local nsamples = target:ne(self.pad_idx):sum()
+    assert(nsamples > 0, 'the number of sample must be non-zero because of <s>')
     local nll = self.criterion_xe:forward(logProb, target)
     nll = nll / nsamples
 
@@ -161,7 +164,7 @@ function Mixer:trainOneBatch(input, target, skips, learning_rate)
     -- (1) take gradient of xent
     local gradLoss = self.criterion_xe:backward(logProb, target)
     -- (2) normalize it by the number of samples
-    gradLoss:div(nsamples)
+    --gradLoss:div(nsamples)
     -- (3) take gradient of REINFORCE
     self.drf:resize(mbsz, length, self.vocab_size):zero()
     self.drf:scatter(3, y:view(mbsz, -1, 1), grad_rf[1]:view(mbsz, -1, 1))

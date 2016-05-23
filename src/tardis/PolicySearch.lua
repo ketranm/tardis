@@ -1,5 +1,5 @@
 -- Beam search
-local utils = require 'util.utils'
+local utils = require 'misc.utils'
 local BLEU = require 'util.BLEU'
 local PolicySearch = torch.class('PolicySearch')
 

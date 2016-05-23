@@ -8,7 +8,7 @@ function RFCriterion:__init(reward_func, eos_idx, pad_idx, skips,
                             weight, weight_predictive_reward)
     parent.__init(self)
 
-    self.sizeAverage = false
+    self.sizeAverage = true
     self.reward_func = reward_func
     self.reward = torch.Tensor()
     self.cumreward = torch.Tensor()

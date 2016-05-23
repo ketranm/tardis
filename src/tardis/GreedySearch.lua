@@ -1,6 +1,5 @@
 -- Beam search
-local utils = require 'util.utils'
-local BLEU = require 'util.BLEU'
+local utils = require 'misc.utils'
 local GreedySearch = torch.class('GreedySearch')
 
 

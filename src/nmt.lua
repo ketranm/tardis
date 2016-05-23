@@ -3,8 +3,8 @@ require 'nn'
 
 -- make sure this script can be run from any folder
 
-require 'util.DataLoader'
-require 'model.NMTA' -- use attention by default
+require 'data.BitextLoader'
+require 'seq2seq.NMTA' -- use attention by default
 require 'tardis.FastBeamSearch'
 
 
@@ -69,8 +69,8 @@ function train()
         print('number of batches: ', nbatches)
         for i = 1, nbatches do
             local src, trg, nextTrg = prepro(loader:nextBatch())
-            nll = nll + model:forward({src, trg}, nextTrg:view(-1))
-            model:backward({src, trg}, nextTrg:view(-1))
+            nll = nll + model:forward({src, trg}, nextTrg)
+            model:backward({src, trg}, nextTrg)
             model:update(config.learningRate)
             if i % config.reportEvery == 0 then
                 xlua.progress(i, nbatches)
