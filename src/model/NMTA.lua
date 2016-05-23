@@ -74,7 +74,7 @@ function NMT:forward(input, target)
     Return:
     - `logProb` : negative log-likelihood of the mini-batch
     --]]
-
+    local target = target:view(-1)
     self:stepEncoder(input[1])
     local logProb = self:stepDecoder(input[2])
     self.tot:resizeAs(target)
@@ -101,7 +101,7 @@ function NMT:backward(input, target, gradOutput)
     local gradLoss = gradOutput
     -- by default, we use Cross-Entropy loss
     if not gradLoss then
-        gradLoss = self.criterion:backward(logProb, target)
+        gradLoss = self.criterion:backward(logProb, target:view(-1))
         local norm_coeff = 1/ (self.sizeAverage and self.numSamples or 1)
         gradLoss:mul(norm_coeff)
     end
