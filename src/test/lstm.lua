@@ -14,7 +14,7 @@ local function check_size(x, dims)
 end
 
 
-function tests.testForward()
+function tests.forward()
     local N, T, D, H = 3, 4, 5, 6
 
     local h0 = torch.randn(N, H)
@@ -131,7 +131,7 @@ function tests.gradcheck()
     tester:assertle(db_error, 1e-5)
 end
 
-function tests.carrystateTest()
+function tests.carrystate()
     local N, T, D, H = 5, 6, 7, 8
     local lstm = nn.LSTM(D, H)
 

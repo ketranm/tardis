@@ -7,7 +7,7 @@ local tests = {}
 local tester = torch.Tester()
 
 -- test forward pass
-function tests.testForward()
+function tests.forward()
 	local N, T, D, H = 10, 20, 32, 32
 	local x = torch.randn(N, T, D)
 	local gru = nn.GRU(D, H)

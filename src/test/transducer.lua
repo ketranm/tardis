@@ -21,7 +21,7 @@ local config = {vocabSize = 100000,
                 dropout = 0,
                 rnn = 'lstm'}
 
-function tests.testForwardBackward()
+function tests.forward_backward()
     -- generate example
 
     local N = torch.random(20, 200)
