@@ -42,7 +42,6 @@ function Transducer:__init(config)
 end
 
 function Transducer:updateOutput(input)
-    local batchSize, length = input:size(1), input:size(2)
     return self.transducer:forward(input)
 end
 

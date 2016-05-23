@@ -74,6 +74,14 @@ function DataLoader:_read(mode)
     self.max_batch_idx = -1
 end
 
+function DataLoader:readTrain()
+    self:_read('train')
+end
+
+function DataLoader:readValid()
+    self:_read('valid')
+end
+
 function DataLoader:nbatches()
     return self.curr_tracker.nbatches
 end
@@ -96,14 +104,6 @@ function DataLoader:nextBatch()
         local idx = self.shuffle_idx[self.batch_idx]
         return self.data[idx]
     end
-end
-
-function DataLoader:readTrain()
-    self:_read('train')
-end
-
-function DataLoader:readValid()
-    self:_read('valid')
 end
 
 function DataLoader:_makeVocab(textFile, vocabSize)
