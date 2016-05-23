@@ -13,6 +13,16 @@ Did I mention the TARDIS looks like a BLEU telephone box. Oops, I meant blue tel
 - Bilinear/Dot attention mechanism
 - Hard Attention (using REINFORCE update rule)
 
+## Code Organization
+The code is organized as follow
+
+- `src/core` Contains core modules, such as fast LSTM, GRU, MemoryBlock, ... These are building units of more complicated models,
+- `src/seq2seq` Neural machine translation modules,
+- `src/data` Data processing scripts, to create/load bitext or monolingual data,
+- `src/misc` some ultility functions
+- `src/tardis` search engine, probably should rename to `search`
+- `src/test` unit tests
+
 ## Planing
 - Recurrent Memory Networks (in progress)
 - Character LSMT models
