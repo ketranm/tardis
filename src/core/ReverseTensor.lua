@@ -3,10 +3,15 @@
 -- author: Ke Tran <m.k.tran@uva.nl>
 local ReverseTensor, parent = torch.class('nn.ReverseTensor', 'nn.Module')
 
-function ReverseTensor:__init(dim)
+function ReverseTensor:__init(dim, bprop)
     parent.__init(self)
     self.dim = dim or 1
     self.rev_index = torch.LongTensor()
+    if bprop ~= nil then
+    	self.bprop = bprop
+    else
+    	self.bprop = true
+    end
 end
 
 function ReverseTensor:updateOutput(input)
@@ -17,6 +22,10 @@ function ReverseTensor:updateOutput(input)
 end
 
 function ReverseTensor:updateGradInput(input, gradOutput)
-    self.gradInput = gradOutput:index(self.dim, self.rev_index)
+	if self.bprop then
+    	self.gradInput = gradOutput:index(self.dim, self.rev_index)
+    else
+    	self.gradInput:resize(0)
+    end
     return self.gradInput
 end
