@@ -16,11 +16,11 @@ function LSTM:__init(input_size, hidden_size)
 
     self:reset() -- reset parameters
 
-    self.cell = torch.Tensor()    -- This will be (N,T,H)
-    self.gates = torch.Tensor()   -- This will be (N,T,H)
-    self.buffer_h = torch.Tensor() -- This will be (N,H)
-    self.buffer_c = torch.Tensor() -- This will be (N,H)
-    self.buffer_b = torch.Tensor() -- This will be (H,)
+    self.cell = torch.Tensor()    -- This will be (N, T, H)
+    self.gates = torch.Tensor()   -- This will be (N, T, H)
+    self.buffer_h = torch.Tensor() -- This will be (N, H)
+    self.buffer_c = torch.Tensor() -- This will be (N ,H)
+    self.buffer_b = torch.Tensor() -- This will be (H, )
     self.grad_a_buffer = torch.Tensor()
 
     self.h0 = torch.Tensor() -- initial hidden state
@@ -38,7 +38,7 @@ function LSTM:reset(std)
         std = 1.0 / math.sqrt(self.hidden_size + self.input_size)
     end
     self.bias:zero()
-    self.bias[{{self.hidden_size+1, 2*self.hidden_size}}]:fill(1) -- bias of the forget gate
+    self.bias[{{self.hidden_size + 1, 2 * self.hidden_size}}]:fill(1) -- bias of the forget gate
     self.weight:normal(0,std)
     return self
 end
@@ -62,9 +62,8 @@ function LSTM:_get_sizes(input)
 end
 
 function LSTM:setGradState(grad_state)
-    --[[This function is helpful for seq2seq model
-    It set the initial gradient that comes to state of the encoder
-    ]]
+    -- This function is helpful for seq2seq model
+    -- It set the initial gradient that comes to state of the encoder
     local grad_c0, grad_h0 = unpack(grad_state)
     self.grad_c0:resizeAs(grad_c0):copy(grad_c0)
     self.grad_h0:resizeAs(grad_h0):copy(grad_h0)
@@ -74,9 +73,9 @@ end
 
 
 function LSTM:getGradState()
-    --[[This is useful for seq2seq model
-    We use it to get gradient that comes out of state of the decoder
-    --]]
+    -- This is useful for seq2seq model
+    -- We use it to get gradient that comes out of state of the decoder
+
     return {self.grad_c0, self.grad_h0}
 end
 
@@ -100,9 +99,10 @@ function LSTM:lastState()
 end
 
 --[[
-Args:
-    input: Input sequence (N,T,D)
-    Output: sequence of hidden state (N,T,H)
+Parameters:
+- `input` : 3D tensor (N, T ,D)
+Returns:
+- `output`: 3D tensor of hidden state (N, T, H)
 --]]
 
 function LSTM:updateOutput(input)
@@ -111,12 +111,8 @@ function LSTM:updateOutput(input)
     local c0, h0 = self.c0, self.h0
 
     if c0:nElement() == 0 or not self._copied_state then
-        c0:resize(N,H):zero()
-    end
-
-
-    if h0:nElement() == 0 or not self._copied_state then
-        h0:resize(N,H):zero()
+        c0:resize(N, H):zero()
+        h0:resize(N, H):zero()
     end
 
     -- compute the output
@@ -126,11 +122,11 @@ function LSTM:updateOutput(input)
     local Wh = self.weight[{{D + 1, D + H}}]
 
     local h, c = self.output, self.cell
-    h:resize(N,T,H):zero()
-    c:resize(N,T,H):zero()
+    h:resize(N, T, H):zero()
+    c:resize(N, T, H):zero()
     -- previous hidden and cell
     local prev_h, prev_c = h0, c0
-    self.gates:resize(N,T,4*H):zero()
+    self.gates:resize(N, T, 4 * H):zero()
     for t = 1,T do
         local x_t = input[{{}, t}]
         local next_h = h[{{}, t}]
@@ -145,8 +141,8 @@ function LSTM:updateOutput(input)
         local f = cur_gates[{{}, {H + 1, 2 * H}}]
         local o = cur_gates[{{}, {2 * H + 1, 3 * H}}]
         local g = cur_gates[{{}, {3 * H + 1, 4 * H}}]
-        next_h:cmul(i,g)
-        next_c:cmul(f,prev_c):add(next_h)
+        next_h:cmul(i, g)
+        next_c:cmul(f, prev_c):add(next_h)
         next_h:tanh(next_c):cmul(o)
         prev_h, prev_c = next_h, next_c
     end
@@ -175,7 +171,7 @@ function LSTM:backward(input, gradOutput, scale)
 
     gradInput:resizeAs(input):zero()
 
-    
+
     local grad_next_h = self.buffer_h:resizeAs(h0)
     local grad_next_c = self.buffer_c:resizeAs(c0)
 
