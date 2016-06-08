@@ -67,9 +67,10 @@ function layer:lastState()
 end
 
 --[[
-Args:
-    input: A Tensor of (batch_size, seq_length, input_size)
-    output: Tensor of (batch_size, seq_length, hidden_size)
+Parameters:
+- `input`:  A Tensor of (batch_size, seq_length, input_size)
+Returns:
+- `output` : Tensor of (batch_size, seq_length, hidden_size)
 --]]
 function layer:updateOutput(input)
     local N, T = input:size(1), input:size(2)
@@ -116,7 +117,6 @@ end
 function layer:backward(input, gradOutput, scale)
     scale = scale or 1.0
     local  x = input
-    --local h0, x = input[1], input[2]
     local h0 = nil
     if not h0 then h0 = self.h0 end
 
