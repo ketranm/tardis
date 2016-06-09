@@ -1,8 +1,17 @@
 local LSTM, parent = torch.class('nn.LSTM', 'nn.Module')
 
--- This implementation is based on Justin Johnson's torch-rnn
--- https://github.com/jcjohnson/torch-rnn
+--[[
+This is an adaptation of Justin Johnson's torch-rnn
+* https://github.com/jcjohnson/torch-rnn
 
+If we add up the sizes of all the tensors for output, gradInput, weights,
+gradWeights, and temporary buffers, we get that a SequenceLSTM stores this many
+scalar values:
+NTD + 6NTH + 8NH + 8H^2 + 8DH + 9H
+For N = 100, D = 512, T = 100, H = 1024 and with 4 bytes per number, this comes
+out to 305MB. Note that this class doesn't own input or gradOutput, so you'll
+see a bit higher memory usage in practice.
+--]]
 function LSTM:__init(input_size, hidden_size)
     parent.__init(self)
 
