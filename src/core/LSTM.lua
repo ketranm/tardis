@@ -1,7 +1,3 @@
-require 'torch'
-require 'nn'
-
-
 local layer, parent = torch.class('nn.LSTM', 'nn.Module')
 
 --[[
