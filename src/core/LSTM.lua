@@ -69,6 +69,7 @@ function layer:setStates(states)
     local c0, h0 = unpack(states)
     self.c0:resizeAs(c0):copy(c0)
     self.h0:resizeAs(h0):copy(h0)
+    self._set_state = true
 end
 
 
@@ -130,26 +131,14 @@ function layer:updateOutput(input)
 
     self._return_grad_c0 = (c0 ~= nil)
     self._return_grad_h0 = (h0 ~= nil)
-    if not c0 then
-        c0 = self.c0
-        if c0:nElement() == 0 or not self.remember_states then
-            c0:resize(N, H):zero()
-        elseif self.remember_states then
-            local prev_N, prev_T = self.cell:size(1), self.cell:size(2)
-            assert(prev_N == N, 'batch sizes must be constant to remember states')
-            c0:copy(self.cell[{{}, prev_T}])
-        end
+    -- simplified
+    if not c0 then c0 = self.c0 end
+    if not h0 then h0 = self.h0 end
+    if c0:nElement() == 0 or not self._set_state then
+        c0:resize(N, H):zero()
     end
-
-    if not h0 then
-        h0 = self.h0
-        if h0:nElement() == 0 or not self.remember_states then
-            h0:resize(N, H):zero()
-        elseif self.remember_states then
-            local prev_N, prev_T = self.output:size(1), self.output:size(2)
-            assert(prev_N == N, 'batch sizes must be the same to remember states')
-            h0:copy(self.output[{{}, prev_T}])
-        end
+    if h0:nElement() == 0 or not self._set_state then
+        h0:resize(N, H):zero()
     end
 
     local bias_expand = self.bias:view(1, 4 * H):expand(N, 4 * H)
