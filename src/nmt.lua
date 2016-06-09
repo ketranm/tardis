@@ -31,7 +31,6 @@ local loader = DataLoader(config)
 config.pad_idx = loader.pad_idx
 
 local model = nn.NMT(config)
--- overwrite config
 
 if config.gpuid >= 0 then
     model:cuda()
