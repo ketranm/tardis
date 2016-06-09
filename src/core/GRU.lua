@@ -1,7 +1,7 @@
 local layer, parent = torch.class('nn.GRU', 'nn.Module')
 
 --[[ A implementation of Gated Recurrent Unit
-Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling
+http://jmlr.org/proceedings/papers/v37/jozefowicz15.pdf
 Author: Ke Tran <m.k.tran@uva.nl>
 Version 1.0
 --]]
@@ -150,8 +150,8 @@ function layer:updateOutput(input)
         cur_buffer:cmul(prev_h, r)
         local hc = cur_gates[{{}, {2 * H + 1, 3 * H}}]:addmm(cur_buffer, Whc):tanh()
         local next_h = h[{{}, t}]
-        next_h:csub(z):cmul(prev_h) -- (1-z)*prev_h + z*hc
-        next_h:addcmul(z, hc)
+        next_h:csub(z):cmul(hc) -- (1-z)*hc + z*prev_h
+        next_h:addcmul(z, prev_h)
         prev_h = next_h
     end
     return self.output
@@ -206,21 +206,22 @@ function layer:backward(input, gradOutput, scale)
 
         --[[Use grad_ar (reset gate) to store intermediate tensor.
         1. Store gradient that will come to update gate.
-        2. Store tanh^2 to compute gradient that comes to candidate gate cand_h
-        3. Store gradient come to the buffer (dot(gate_r, prev_h))
+        2. Store gradient that comes to candidate gate hc
+        3. Store gradient come to the buffer dot(r, prev_h)
         --]]
-        grad_ar:add(hc, -1, prev_h):cmul(grad_next_h) -- (hc - prev_h) * grad_next_h
+        grad_ar:add(prev_h, -1, hc):cmul(grad_next_h) -- (hc - prev_h) * grad_next_h
         grad_az:csub(z):cmul(z):cmul(grad_ar)
 
-        local tanh2 = grad_ar:cmul(hc, hc)  -- tanh square
-        grad_ah:csub(tanh2):cmul(z):cmul(grad_next_h)
-        -- this will be (N, H) x (H, H) = N, H)
+        grad_ar:fill(0):addcmul(grad_next_h, -1, z, grad_next_h)
+        grad_ah:addcmul(-1, hc, hc):cmul(grad_ar)
+
+        -- this will be (N, H) x (H, H) = (N, H)
         grad_ar:mm(grad_ah, Whc:t()) -- grad to buffer
         grad_Whc:addmm(scale, cur_buffer:t(), grad_ah)
 
         -- we do not need cur_buffer anymore, so use it to store temporal values
         -- compute gradient comes to grad_next_h
-        cur_buffer:fill(1):csub(z):cmul(grad_next_h)
+        cur_buffer:cmul(z, grad_next_h)
         -- now we do not need grad_next_h anymore, overwrite it
         -- grad_ar now is a gradient that comes to buffer
         grad_next_h:cmul(grad_ar, r):add(cur_buffer)
