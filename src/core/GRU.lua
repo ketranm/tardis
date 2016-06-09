@@ -58,6 +58,7 @@ end
 function layer:setStates(state)
     local h0 = state[1]
     self.h0:resizeAs(h0):copy(h0)
+    self._set_state = true
 end
 
 
@@ -116,20 +117,13 @@ Output:
 - h: Sequence of hidden states, (N, T, H)
 --]]
 function layer:updateOutput(input)
-    local h0, x = self:_unpack_input(input)
+    local h0, x = self.h0, input
     local N, T, D, H = self:_get_sizes(input)
 
     self._return_grad_h0 = (h0 ~= nil)
 
-    if not h0 then
-        h0 = self.h0
-        if h0:nElement() == 0 or not self.remember_states then
-            h0:resize(N, H):zero()
-        elseif self.remember_states then
-            local prev_N, prev_T = self.output:size(1), self.output:size(2)
-            assert(prev_N == N, 'batch sizes must be the same to remember states')
-            h0:copy(self.output[{{}, prev_T}])
-        end
+    if h0:nElement() == 0 or not self._set_state then
+        h0:resize(N, H):zero()
     end
 
     -- expand the bias to the batch_size
@@ -165,9 +159,7 @@ end
 
 function layer:backward(input, gradOutput, scale)
     scale = scale or 1.0
-    local h0, x = self:_unpack_input(input)
-    if not h0 then h0 = self.h0 end
-
+    local h0, x = self.h0, input
     local grad_h0, grad_x = self.grad_h0, self.gradInput
     local h = self.output
     local grad_h = gradOutput
