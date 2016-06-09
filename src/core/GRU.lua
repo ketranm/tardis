@@ -150,7 +150,7 @@ function layer:updateOutput(input)
         cur_buffer:cmul(prev_h, r)
         local hc = cur_gates[{{}, {2 * H + 1, 3 * H}}]:addmm(cur_buffer, Whc):tanh()
         local next_h = h[{{}, t}]
-        next_h:csub(z):cmul(hc) -- (1-z)*hc + z*prev_h
+        next_h:addcmul(hc, -1, z, hc)
         next_h:addcmul(z, prev_h)
         prev_h = next_h
     end
@@ -210,7 +210,7 @@ function layer:backward(input, gradOutput, scale)
         3. Store gradient come to the buffer dot(r, prev_h)
         --]]
         grad_ar:add(prev_h, -1, hc):cmul(grad_next_h) -- (hc - prev_h) * grad_next_h
-        grad_az:csub(z):cmul(z):cmul(grad_ar)
+        grad_az:add(-1, z):cmul(z):cmul(grad_ar)
 
         grad_ar:fill(0):addcmul(grad_next_h, -1, z, grad_next_h)
         grad_ah:addcmul(-1, hc, hc):cmul(grad_ar)
@@ -227,8 +227,8 @@ function layer:backward(input, gradOutput, scale)
         grad_next_h:cmul(grad_ar, r):add(cur_buffer)
         -- reset cur_buffer as we do not need it
         cur_buffer:cmul(prev_h, grad_ar) -- gradient to reset gate
-
-        grad_ar:fill(1):csub(r):cmul(r):cmul(cur_buffer)
+        grad_ar:addcmul(r, -1, r, r):cmul(cur_buffer)
+        --grad_ar:fill(1):add(-1, r):cmul(r):cmul(cur_buffer)
         grad_Wx:addmm(scale, x[{{}, t}]:t(), grad_a)
         grad_Wrz:addmm(scale, prev_h:t(), grad_a[{{}, {1, 2 * H}}])
 
