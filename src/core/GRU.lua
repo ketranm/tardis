@@ -227,8 +227,8 @@ function layer:backward(input, gradOutput, scale)
         grad_next_h:cmul(grad_ar, r):add(cur_buffer)
         -- reset cur_buffer as we do not need it
         cur_buffer:cmul(prev_h, grad_ar) -- gradient to reset gate
+
         grad_ar:addcmul(r, -1, r, r):cmul(cur_buffer)
-        --grad_ar:fill(1):add(-1, r):cmul(r):cmul(cur_buffer)
         grad_Wx:addmm(scale, x[{{}, t}]:t(), grad_a)
         grad_Wrz:addmm(scale, prev_h:t(), grad_a[{{}, {1, 2 * H}}])
 
