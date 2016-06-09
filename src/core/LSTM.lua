@@ -33,12 +33,10 @@ function layer:__init(input_dim, hidden_dim)
 
     self.h0 = torch.Tensor()
     self.c0 = torch.Tensor()
-    self.remember_states = false
 
     self.grad_c0 = torch.Tensor()
     self.grad_h0 = torch.Tensor()
-    self.grad_x = torch.Tensor()
-    self.gradInput = {self.grad_c0, self.grad_h0, self.grad_x}
+    self.gradInput = torch.Tensor()
 end
 
 
@@ -126,14 +124,9 @@ Output:
 
 
 function layer:updateOutput(input)
-    local c0, h0, x = self:_unpack_input(input)
+    local c0, h0, x = self.c0, self.h0, input
     local N, T, D, H = self:_get_sizes(input)
 
-    self._return_grad_c0 = (c0 ~= nil)
-    self._return_grad_h0 = (h0 ~= nil)
-    -- simplified
-    if not c0 then c0 = self.c0 end
-    if not h0 then h0 = self.h0 end
     if c0:nElement() == 0 or not self._set_state then
         c0:resize(N, H):zero()
     end
@@ -184,11 +177,8 @@ end
 
 function layer:backward(input, gradOutput, scale)
     scale = scale or 1.0
-    local c0, h0, x = self:_unpack_input(input)
-    if not c0 then c0 = self.c0 end
-    if not h0 then h0 = self.h0 end
-
-    local grad_c0, grad_h0, grad_x = self.grad_c0, self.grad_h0, self.grad_x
+    local c0, h0, x = self.c0, self.h0, input
+    local grad_c0, grad_h0, grad_x = self.grad_c0, self.grad_h0, self.gradInput
     local h, c = self.output, self.cell
     local grad_h = gradOutput
 
@@ -266,14 +256,6 @@ function layer:backward(input, gradOutput, scale)
     grad_h0:copy(grad_next_h)
     grad_c0:copy(grad_next_c)
 
-    if self._return_grad_c0 and self._return_grad_h0 then
-        self.gradInput = {self.grad_c0, self.grad_h0, self.grad_x}
-    elseif self._return_grad_h0 then
-        self.gradInput = {self.grad_h0, self.grad_x}
-    else
-        self.gradInput = self.grad_x
-    end
-
     return self.gradInput
 end
 
@@ -288,7 +270,7 @@ function layer:clearState()
         'grad_a_buffer',
         'grad_c0',
         'grad_h0',
-        'grad_x',
+        'gradInput',
         'output'})
     return parent.clearState(self)
 end
