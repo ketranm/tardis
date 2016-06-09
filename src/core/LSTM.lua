@@ -1,63 +1,81 @@
-local LSTM, parent = torch.class('nn.LSTM', 'nn.Module')
+require 'torch'
+require 'nn'
+
+
+local layer, parent = torch.class('nn.LSTM', 'nn.Module')
 
 --[[
-This is an adaptation of Justin Johnson's torch-rnn
-* https://github.com/jcjohnson/torch-rnn
-
 If we add up the sizes of all the tensors for output, gradInput, weights,
 gradWeights, and temporary buffers, we get that a SequenceLSTM stores this many
 scalar values:
+
 NTD + 6NTH + 8NH + 8H^2 + 8DH + 9H
+
 For N = 100, D = 512, T = 100, H = 1024 and with 4 bytes per number, this comes
 out to 305MB. Note that this class doesn't own input or gradOutput, so you'll
 see a bit higher memory usage in practice.
 --]]
-function LSTM:__init(input_size, hidden_size)
+
+function layer:__init(input_dim, hidden_dim)
     parent.__init(self)
 
-    local D, H = input_size, hidden_size
-    self.input_size, self.hidden_size = D, H
+    local D, H = input_dim, hidden_dim
+    self.input_dim, self.hidden_dim = D, H
 
-    self.weight = torch.Tensor(D + H, 4 * H)  -- for fast computing
-    self.gradWeight = torch.Tensor(D + H, 4 *H):zero()
+    self.weight = torch.Tensor(D + H, 4 * H)
+    self.gradWeight = torch.Tensor(D + H, 4 * H):zero()
     self.bias = torch.Tensor(4 * H)
     self.gradBias = torch.Tensor(4 * H):zero()
-
-    self:reset() -- reset parameters
+    self:reset()
 
     self.cell = torch.Tensor()    -- This will be (N, T, H)
-    self.gates = torch.Tensor()   -- This will be (N, T, H)
-    self.buffer_h = torch.Tensor() -- This will be (N, H)
-    self.buffer_c = torch.Tensor() -- This will be (N ,H)
-    self.buffer_b = torch.Tensor() -- This will be (H, )
-    self.grad_a_buffer = torch.Tensor()
+    self.gates = torch.Tensor()   -- This will be (N, T, 4H)
+    self.buffer1 = torch.Tensor() -- This will be (N, H)
+    self.buffer2 = torch.Tensor() -- This will be (N, H)
+    self.buffer3 = torch.Tensor() -- This will be (H,)
+    self.grad_a_buffer = torch.Tensor() -- This will be (N, 4H)
 
-    self.h0 = torch.Tensor() -- initial hidden state
-    self.c0 = torch.Tensor() -- initial cell state
+    self.h0 = torch.Tensor()
+    self.c0 = torch.Tensor()
+    self.remember_states = false
 
-    self.grad_h0 = torch.Tensor()
     self.grad_c0 = torch.Tensor()
-
-    self.gradInput =  torch.Tensor()
-    self.output = torch.Tensor()
+    self.grad_h0 = torch.Tensor()
+    self.grad_x = torch.Tensor()
+    self.gradInput = {self.grad_c0, self.grad_h0, self.grad_x}
 end
 
-function LSTM:reset(std)
+
+function layer:reset(std)
     if not std then
-        std = 1.0 / math.sqrt(self.hidden_size + self.input_size)
+        std = 1.0 / math.sqrt(self.hidden_dim + self.input_dim)
     end
     self.bias:zero()
-    self.bias[{{self.hidden_size + 1, 2 * self.hidden_size}}]:fill(1) -- bias of the forget gate
-    self.weight:normal(0,std)
+    self.bias[{{self.hidden_dim + 1, 2 * self.hidden_dim}}]:fill(1)
+    self.weight:normal(0, std)
     return self
 end
 
-function LSTM:resetState()
+
+function layer:resetStates()
     self.h0 = self.h0.new()
     self.c0 = self.c0.new()
 end
 
--- helper function
+
+function layer:lastStates()
+    local prev_T = self.cell:size(2)
+    return {self.cell[{{}, prev_T}], self.output[{{}, prev_T}]}
+end
+
+
+function layer:setStates(states)
+    local c0, h0 = unpack(states)
+    self.c0:resizeAs(c0):copy(c0)
+    self.h0:resizeAs(h0):copy(h0)
+end
+
+
 local function check_dims(x, dims)
     assert(x:dim() == #dims)
     for i, d in ipairs(dims) do
@@ -65,87 +83,97 @@ local function check_dims(x, dims)
     end
 end
 
-function LSTM:_get_sizes(input)
-    -- return batch size and sequence length
-    return input:size(1), input:size(2)
+
+function layer:_unpack_input(input)
+    local c0, h0, x = nil, nil, nil
+    if torch.type(input) == 'table' and #input == 3 then
+        c0, h0, x = unpack(input)
+    elseif torch.type(input) == 'table' and #input == 2 then
+        h0, x = unpack(input)
+    elseif torch.isTensor(input) then
+        x = input
+    else
+        assert(false, 'invalid input')
+    end
+    return c0, h0, x
 end
 
-function LSTM:setGradState(grad_state)
-    -- This function is helpful for seq2seq model
-    -- It set the initial gradient that comes to state of the encoder
-    local grad_c0, grad_h0 = unpack(grad_state)
-    self.grad_c0:resizeAs(grad_c0):copy(grad_c0)
-    self.grad_h0:resizeAs(grad_h0):copy(grad_h0)
-    -- use flag to guide backward pass
-    self._init_grad_state = true
+
+function layer:_get_sizes(input, gradOutput)
+    local c0, h0, x = self:_unpack_input(input)
+    local N, T = x:size(1), x:size(2)
+    local H, D = self.hidden_dim, self.input_dim
+    check_dims(x, {N, T, D})
+    if h0 then
+        check_dims(h0, {N, H})
+    end
+    if c0 then
+        check_dims(c0, {N, H})
+    end
+    if gradOutput then
+        check_dims(gradOutput, {N, T, H})
+    end
+  return N, T, D, H
 end
 
-
-function LSTM:getGradState()
-    -- This is useful for seq2seq model
-    -- We use it to get gradient that comes out of state of the decoder
-
-    return {self.grad_c0, self.grad_h0}
-end
-
-function LSTM:initState(state)
-    --[[This is useful for Seq2seq where we initialize the decoder from encoder's state
-    When the RNN starts from a given state, we might want to get the gradient comes of of it
-    so we set the copied flag to indicate so
-    --]]
-    local c0, h0 = unpack(state)
-    self.c0:resizeAs(c0):copy(c0)
-    self.h0:resizeAs(h0):copy(h0)
-    self._copied_state = true
-end
-
-function LSTM:lastState()
-    -- useful in Seq2seq model
-    local N, T = self.cell:size(1), self.cell:size(2)
-    local last_c = self.cell[{{}, T}]
-    local last_h = self.output[{{}, T}]
-    return {last_c, last_h}
-end
 
 --[[
-Parameters:
-- `input` : 3D tensor (N, T ,D)
-Returns:
-- `output`: 3D tensor of hidden state (N, T, H)
+Input:
+- c0: Initial cell state, (N, H)
+- h0: Initial hidden state, (N, H)
+- x: Input sequence, (N, T, D)
+
+Output:
+- h: Sequence of hidden states, (N, T, H)
 --]]
 
-function LSTM:updateOutput(input)
-    local N, T = self:_get_sizes(input)
-    local D, H = self.input_size, self.hidden_size
-    local c0, h0 = self.c0, self.h0
 
-    if c0:nElement() == 0 or not self._copied_state then
-        c0:resize(N, H):zero()
-        h0:resize(N, H):zero()
+function layer:updateOutput(input)
+    local c0, h0, x = self:_unpack_input(input)
+    local N, T, D, H = self:_get_sizes(input)
+
+    self._return_grad_c0 = (c0 ~= nil)
+    self._return_grad_h0 = (h0 ~= nil)
+    if not c0 then
+        c0 = self.c0
+        if c0:nElement() == 0 or not self.remember_states then
+            c0:resize(N, H):zero()
+        elseif self.remember_states then
+            local prev_N, prev_T = self.cell:size(1), self.cell:size(2)
+            assert(prev_N == N, 'batch sizes must be constant to remember states')
+            c0:copy(self.cell[{{}, prev_T}])
+        end
     end
 
-    -- compute the output
-    -- expand bias to N, the batch size
-    local bias_expand = self.bias:view(1, 4*H):expand(N, 4*H)
+    if not h0 then
+        h0 = self.h0
+        if h0:nElement() == 0 or not self.remember_states then
+            h0:resize(N, H):zero()
+        elseif self.remember_states then
+            local prev_N, prev_T = self.output:size(1), self.output:size(2)
+            assert(prev_N == N, 'batch sizes must be the same to remember states')
+            h0:copy(self.output[{{}, prev_T}])
+        end
+    end
+
+    local bias_expand = self.bias:view(1, 4 * H):expand(N, 4 * H)
     local Wx = self.weight[{{1, D}}]
     local Wh = self.weight[{{D + 1, D + H}}]
 
     local h, c = self.output, self.cell
     h:resize(N, T, H):zero()
     c:resize(N, T, H):zero()
-    -- previous hidden and cell
     local prev_h, prev_c = h0, c0
     self.gates:resize(N, T, 4 * H):zero()
-    for t = 1,T do
-        local x_t = input[{{}, t}]
+    for t = 1, T do
+        local cur_x = x[{{}, t}]
         local next_h = h[{{}, t}]
         local next_c = c[{{}, t}]
         local cur_gates = self.gates[{{}, t}]
-        cur_gates:addmm(bias_expand, x_t, Wx)
+        cur_gates:addmm(bias_expand, cur_x, Wx)
         cur_gates:addmm(prev_h, Wh)
         cur_gates[{{}, {1, 3 * H}}]:sigmoid()
         cur_gates[{{}, {3 * H + 1, 4 * H}}]:tanh()
-        -- pointer to gates
         local i = cur_gates[{{}, {1, H}}]
         local f = cur_gates[{{}, {H + 1, 2 * H}}]
         local o = cur_gates[{{}, {2 * H + 1, 3 * H}}]
@@ -155,46 +183,52 @@ function LSTM:updateOutput(input)
         next_h:tanh(next_c):cmul(o)
         prev_h, prev_c = next_h, next_c
     end
-
     return self.output
 end
 
+function layer:setGrad(grad0)
+    self._set_grad = true
+    self.grad_c0 = grad0[1]
+    self.grad_h0 = grad0[2]
+end
 
-function LSTM:backward(input, gradOutput, scale)
+
+function layer:getGrad()
+    return {self.grad_c0, self.grad_h0}
+end
+
+function layer:backward(input, gradOutput, scale)
     scale = scale or 1.0
-    local c0, h0 = self.c0, self.h0
+    local c0, h0, x = self:_unpack_input(input)
+    if not c0 then c0 = self.c0 end
+    if not h0 then h0 = self.h0 end
 
-    local grad_c0, grad_h0, gradInput = self.grad_c0, self.grad_h0, self.gradInput
+    local grad_c0, grad_h0, grad_x = self.grad_c0, self.grad_h0, self.grad_x
     local h, c = self.output, self.cell
     local grad_h = gradOutput
 
-    local N, T = self:_get_sizes(input)
-    local D, H = self.input_size, self.hidden_size
-
+    local N, T, D, H = self:_get_sizes(input, gradOutput)
     local Wx = self.weight[{{1, D}}]
     local Wh = self.weight[{{D + 1, D + H}}]
-
     local grad_Wx = self.gradWeight[{{1, D}}]
     local grad_Wh = self.gradWeight[{{D + 1, D + H}}]
     local grad_b = self.gradBias
 
-    gradInput:resizeAs(input):zero()
-
-
-    local grad_next_h = self.buffer_h:resizeAs(h0)
-    local grad_next_c = self.buffer_c:resizeAs(c0)
-
-    if not self._init_grad_state then
-        -- reset gradient
+    grad_x:resizeAs(x):zero()
+    local grad_next_h, grad_next_c = nil, nil
+    if self._set_grad then
+        grad_next_h = self.buffer1:resizeAs(h0):copy(grad_h0)
+        grad_next_c = self.buffer2:resizeAs(c0):copy(grad_c0)
+    else
         grad_h0:resizeAs(h0):zero()
         grad_c0:resizeAs(c0):zero()
-    end
-    grad_next_h:copy(grad_h0)
-    grad_next_c:copy(grad_c0)
 
+        grad_next_h = self.buffer1:resizeAs(h0):zero()
+        grad_next_c = self.buffer2:resizeAs(c0):zero()
+    end
     for t = T, 1, -1 do
         local next_h, next_c = h[{{}, t}], c[{{}, t}]
-        local prev_h, prev_c
+        local prev_h, prev_c = nil, nil
         if t == 1 then
             prev_h, prev_c = h0, c0
         else
@@ -207,11 +241,11 @@ function LSTM:backward(input, gradOutput, scale)
         local o = self.gates[{{}, t, {2 * H + 1, 3 * H}}]
         local g = self.gates[{{}, t, {3 * H + 1, 4 * H}}]
 
-        local grad_a = self.grad_a_buffer:resize(N, 4*H):zero()
-        local grad_ai = grad_a[{{}, {1, H}}]       -- gradient to input gate
-        local grad_af = grad_a[{{}, {H + 1, 2 * H}}]   -- gradient to forget gate
-        local grad_ao = grad_a[{{}, {2 * H + 1, 3 * H}}] -- gradient to output gate
-        local grad_ag = grad_a[{{}, {3 * H + 1, 4 * H}}] -- gradient to update gate
+        local grad_a = self.grad_a_buffer:resize(N, 4 * H):zero()
+        local grad_ai = grad_a[{{}, {1, H}}]
+        local grad_af = grad_a[{{}, {H + 1, 2 * H}}]
+        local grad_ao = grad_a[{{}, {2 * H + 1, 3 * H}}]
+        local grad_ag = grad_a[{{}, {3 * H + 1, 4 * H}}]
 
         -- We will use grad_ai, grad_af, and grad_ao as temporary buffers
         -- to to compute grad_next_c. We will need tanh_next_c (stored in grad_ai)
@@ -224,21 +258,21 @@ function LSTM:backward(input, gradOutput, scale)
         grad_next_c:add(my_grad_next_c)
 
         -- We need tanh_next_c (currently in grad_ai) to compute grad_ao; after
-        -- that we can overwrite it
+        -- that we can overwrite it.
         grad_ao:fill(1):add(-1, o):cmul(o):cmul(tanh_next_c):cmul(grad_next_h)
 
         -- Use grad_ai as a temporary buffer for computing grad_ag
-        local g2 = grad_ai:cmul(g,g)
+        local g2 = grad_ai:cmul(g, g)
         grad_ag:fill(1):add(-1, g2):cmul(i):cmul(grad_next_c)
 
         -- We don't need any temporary storage for these so do them last
         grad_ai:fill(1):add(-1, i):cmul(i):cmul(g):cmul(grad_next_c)
         grad_af:fill(1):add(-1, f):cmul(f):cmul(prev_c):cmul(grad_next_c)
 
-        gradInput[{{}, t}]:mm(grad_a, Wx:t())
-        grad_Wx:addmm(scale, input[{{}, t}]:t(), grad_a)
+        grad_x[{{}, t}]:mm(grad_a, Wx:t())
+        grad_Wx:addmm(scale, x[{{}, t}]:t(), grad_a)
         grad_Wh:addmm(scale, prev_h:t(), grad_a)
-        local grad_a_sum = self.buffer_b:resize(4 * H):sum(grad_a, 1)
+        local grad_a_sum = self.buffer3:resize(H):sum(grad_a, 1)
         grad_b:add(scale, grad_a_sum)
 
         grad_next_h:mm(grad_a, Wh:t())
@@ -246,29 +280,41 @@ function LSTM:backward(input, gradOutput, scale)
     end
     grad_h0:copy(grad_next_h)
     grad_c0:copy(grad_next_c)
+
+    if self._return_grad_c0 and self._return_grad_h0 then
+        self.gradInput = {self.grad_c0, self.grad_h0, self.grad_x}
+    elseif self._return_grad_h0 then
+        self.gradInput = {self.grad_h0, self.grad_x}
+    else
+        self.gradInput = self.grad_x
+    end
+
     return self.gradInput
 end
 
-function LSTM:updateGradInput(input, gradOutput)
-    self:backward(input, gradOutput, 0)
-end
 
-function LSTM:accGradParameters(input, gradOutput, scale)
-    self:backward(input, gradOutput, scale)
-end
-
-function LSTM:clearState()
+function layer:clearState()
     nn.utils.clear(self, {
-        'output',
         'cell',
         'gates',
-        'buffer_h',
-        'buffer_c',
-        'buffer_b',
+        'buffer1',
+        'buffer2',
+        'buffer3',
         'grad_a_buffer',
         'grad_c0',
         'grad_h0',
-        'gradInput'
-    })
+        'grad_x',
+        'output'})
     return parent.clearState(self)
 end
+
+
+function layer:updateGradInput(input, gradOutput)
+    self:backward(input, gradOutput, 0)
+end
+
+
+function layer:accGradParameters(input, gradOutput, scale)
+    self:backward(input, gradOutput, scale)
+end
+

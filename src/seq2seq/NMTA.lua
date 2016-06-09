@@ -115,7 +115,7 @@ function NMT:backward(input, target, gradOutput)
 
     self.decoder:backward(input[2], gradDecoder)
     -- initialize gradient from decoder
-    self.encoder:setGradState(self.decoder:getGradState())
+    self.encoder:setGrad(self.decoder:getGrad())
     -- backward to encoder
     local gradEncoder = gradGlimpse[1]
     self.encoder:backward(input[1], gradEncoder)
@@ -162,7 +162,7 @@ function NMT:stepEncoder(x)
     --]]
 
     local outputEncoder = self.encoder:updateOutput(x)
-    local prevState = self.encoder:lastState()
+    local prevState = self.encoder:lastStates()
     self.buffers = {outputEncoder = outputEncoder, prevState = prevState}
 end
 
@@ -183,14 +183,14 @@ function NMT:stepDecoder(x)
     local buffers = self.buffers
     local outputEncoder, prevState = buffers.outputEncoder, buffers.prevState
 
-    self.decoder:initState(prevState)
+    self.decoder:setStates(prevState)
     local outputDecoder = self.decoder:updateOutput(x)
     local context = self.glimpse:forward({outputEncoder, outputDecoder})
     local logProb = self.layer:forward({context, outputDecoder})
 
     -- update buffer, adding information needed for backward pass
     buffers.outputDecoder = outputDecoder
-    buffers.prevState = self.decoder:lastState()
+    buffers.prevState = self.decoder:lastStates()
     buffers.context = context
     buffers.logProb = logProb
 
@@ -216,7 +216,7 @@ function NMT:sample(nsteps, k)
 
     local buffers = self.buffers
     local outputEncoder, prevState = buffers.outputDecoder, buffers.prevState
-    self.decoder:initState(prevState)
+    self.decoder:setStates(prevState)
 
     local logProb = buffers.logProb  -- from the previous prediction
     assert(logProb ~= nil)
@@ -252,7 +252,7 @@ function NMT:indexDecoderState(index)
     - `state` : new hidden state of the decoder, indexed by the argument
     --]]
 
-    local currState = self.decoder:lastState()
+    local currState = self.decoder:lastStates()
     local newState = {}
     for _, state in ipairs(currState) do
         local sk = {}
