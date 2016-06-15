@@ -10,18 +10,24 @@ function BiRNN:__init(config)
     bwrnn:add(nn.Transducer(config))
     bwrnn:add(nn.ReverseTensor(2)) -- reverse output
 
+    self.view = nn.View(-1)
+
     local concat = nn.ConcatTable()
     concat:add(fwrnn)
     concat:add(bwrnn)
     self.btransducer = nn.Sequential()
     self.btransducer:add(concat)
     self.btransducer:add(nn.JoinTable(3))
-
+    self.btransducer:add(nn.View(-1, 2 * config.hiddenSize))
+    self.btransducer:add(nn.Linear(2 * config.hiddenSize, config.hiddenSize, false))
+    self.btransducer:add(self.view)
     self.fwrnn = fwrnn
     self.bwrnn = bwrnn
 end
 
 function BiRNN:updateOutput(input)
+    local N, T = input:size(1), input:size(2)
+    self.view:resetSize(N, T, -1)
     return self.btransducer:forward(input)
 end
 
@@ -31,6 +37,15 @@ end
 
 function BiRNN:parameters()
     return self.btransducer:parameters()
+end
+
+function BiRNN:lastStates()
+    -- this is because we already reverse the sentence
+    return self.fwrnn:lastStates()
+end
+
+function BiRNN:setGrad(grad)
+    self.fwrnn:setGrad(grad)
 end
 
 function BiRNN:training()
