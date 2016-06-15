@@ -7,10 +7,10 @@ local tester = torch.Tester()
 
 
 local function check_size(x, dims)
-    tester:assert(x:dim() == #dims)
-        for i, d in ipairs(dims) do
-            tester:assert(x:size(i) == d)
-        end
+  tester:assert(x:dim() == #dims)
+  for i, d in ipairs(dims) do
+    tester:assert(x:size(i) == d)
+  end
 end
 
 
@@ -19,9 +19,10 @@ function tests.forward()
 
     local h0 = torch.randn(N, H)
     local c0 = torch.randn(N, H)
+    local prev_h, prev_c = h0:clone(), c0:clone()
     local x  = torch.randn(N, T, D)
     local lstm = nn.LSTM(D, H)
-    lstm:initState({c0,h0})
+    lstm:setStates({c0,h0})
     local params, grad_params = lstm:getParameters()
 
     local num_params = (H + D +1) * 4 * H
@@ -49,7 +50,7 @@ function tests.forward()
     local bo = lstm.bias[{{2 * H + 1, 3 * H}}]:view(1, H):expand(N, H)
     local bg = lstm.bias[{{3 * H + 1, 4 * H}}]:view(1, H):expand(N, H)
 
-    local prev_h, prev_c = h0:clone(), c0:clone()
+    
     for t = 1, T do
         local xt = x[{{}, t}]
         local i = torch.sigmoid(torch.mm(xt, Wxi) + torch.mm(prev_h, Whi) + bi)
@@ -74,7 +75,7 @@ function tests.gradcheck()
     local c0 = torch.randn(N, H)
 
     local lstm = nn.LSTM(D, H)
-    lstm:initState({c0,h0})
+    lstm:setStates({c0,h0})
     local h = lstm:forward(x)
 
     local dh = torch.randn(#h)
@@ -82,18 +83,18 @@ function tests.gradcheck()
     lstm:zeroGradParameters()
 
     local dx = lstm:backward(x, dh)
-    local dc0, dh0 = unpack(lstm:getGradState())
+    local dc0, dh0 = unpack(lstm:getGrad())
     local dw = lstm.gradWeight:clone()
     local db = lstm.gradBias:clone()
 
     local function fx(x) return lstm:forward(x) end
     local function fh0(h0)
-        lstm:initState({c0,h0})
+        lstm:setStates({c0,h0})
         return lstm:forward(x)
     end
 
     local function fc0(c0)
-        lstm:initState({c0,h0})
+        lstm:setStates({c0,h0})
         return lstm:forward(x)
     end
 
@@ -137,7 +138,7 @@ function tests.carrystate()
 
     local final_h, final_c = nil, nil
     local dstate = nil
-    local grad_c0, grad_h0 = unpack(lstm:getGradState())
+    local grad_c0, grad_h0 = unpack(lstm:getGrad())
     local lr = 0.01
     for t = 1, 4 do
         local x = torch.randn(N, T, D)
@@ -148,8 +149,8 @@ function tests.carrystate()
         tester:assertTensorEq(lstm.gradWeight, torch.zeros(D + H, 4 *H), 0)
         tester:assertTensorEq(lstm.gradBias, torch.zeros(4 *H), 0)
         if t > 1 then
-            lstm:setGradState(dstate)
-            tester:assert(lstm._init_grad_state)
+            lstm:setGrad(dstate)
+            tester:assert(lstm._set_grad)
         end
 
         local din = lstm:backward(x, dout)
@@ -168,13 +169,13 @@ function tests.carrystate()
         end
         final_c = lstm.cell[{{}, T}]:clone()
         final_h = out[{{}, T}]:clone()
-        local state = lstm:lastState()
-        lstm:initState(state)
-        dstate = lstm:getGradState()
+        local state = lstm:lastStates()
+        lstm:setStates(state)
+        dstate = lstm:getGrad()
     end
 
     -- Initial state should reset to zero after we call resetstate
-    lstm:resetState()
+    lstm:resetStates()
     local x = torch.randn(N, T, D)
     local dout = torch.randn(N, T, H)
     lstm:forward(x)

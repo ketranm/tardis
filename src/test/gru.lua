@@ -52,8 +52,10 @@ function tests.forward()
 		xhr = jhr:forward{xt, hr}
 		local hc = hidden_candiate:forward(xhr)
 		local next_h = h[{{}, t}]
-		next_h:fill(1):add(-1, z):cmul(prev_h)
-		next_h:addcmul(z, hc)
+		next_h:addcmul(hc, -1, z, hc)
+		--next_h:fill(1):add(-1, z):cmul(prev_h)
+		next_h:addcmul(z, prev_h)
+		--next_h:addcmul(z, hc)
 		prev_h = next_h
 	end
 

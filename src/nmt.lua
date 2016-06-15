@@ -5,7 +5,7 @@ require 'nn'
 
 require 'data.BitextLoader'
 require 'seq2seq.NMTA' -- use attention by default
-require 'tardis.FastBeamSearch'
+require 'search.BeamSearch'
 
 
 local timer = torch.Timer()
@@ -76,6 +76,7 @@ function train()
                 print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
                 collectgarbage()
             end
+            model:clearState()
         end
 
         if epoch > config.decayAfter then
