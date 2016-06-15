@@ -1,6 +1,5 @@
 -- Beam search
 local utils = require 'misc.utils'
-local BLEU = require 'util.BLEU'
 local BeamSearch = torch.class('BeamSearch')
 
 
@@ -209,6 +208,7 @@ function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
         -- stringx.count is fast
         local length = stringx.count(hypo, ' ') + 1
         local align = self:printAttention(completeHypsAtt[hypo], 1, false)
+        --[[
         if ref then
             local reward = BLEU.score(hypo, ref) * 100  -- rescale for readability
             info = string.format('n=%d s=%.4f l=%d b=%.4f\t%s\t%s',
@@ -217,6 +217,9 @@ function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
             info = string.format('n=%d s=%.4f l=%d\t%s\t%s',
                                 rank, completeHyps[hypo], length, hypo, align)
         end
+        --]]
+        info = string.format('n=%d s=%.4f l=%d\t%s\t%s',
+                                rank, completeHyps[hypo], length, hypo, align)
         table.insert(nBestList, info)
     end
     return nBestList
