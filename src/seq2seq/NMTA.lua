@@ -41,7 +41,7 @@ function NMT:__init(config)
     local weights = torch.ones(config.trgVocabSize)
     weights[config.pad_idx] = 0
 
-    self.sizeAverage = false
+    self.sizeAverage = true
     self.pad_idx = config.pad_idx
     self.criterion = nn.ClassNLLCriterion(weights, false)
     self.tot = torch.Tensor() -- count non padding symbols
