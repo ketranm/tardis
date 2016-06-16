@@ -4,8 +4,8 @@ require 'nn'
 -- make sure this script can be run from any folder
 
 require 'data.BitextLoader'
-require 'seq2seq.NMTA' -- use attention by default
-require 'search.BeamSearch'
+require 'seq2seq.BiNMT' -- use attention by default
+require 'search.Beam'
 
 
 local timer = torch.Timer()
