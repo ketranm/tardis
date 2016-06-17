@@ -68,15 +68,20 @@ function train()
         print('number of batches: ', nbatches)
         for i = 1, nbatches do
             local src, trg, nextTrg = prepro(loader:nextBatch())
+            --[[
+            local src, trg, nextTrg = prepro(loader:nextBatch())
             nll = nll + model:forward({src, trg}, nextTrg)
             model:backward({src, trg}, nextTrg)
             model:update(config.learningRate)
+            
+            ]]
+            nll = nll + model:learn({src, trg}, nextTrg)
+            model:clearState()
             if i % config.reportEvery == 0 then
                 xlua.progress(i, nbatches)
                 print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
                 collectgarbage()
             end
-            model:clearState()
         end
 
         if epoch > config.decayAfter then

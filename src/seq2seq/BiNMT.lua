@@ -5,6 +5,7 @@ url: http://www.aclweb.org/anthology/D15-1166
 require 'core.Transducer'
 require 'core.GlimpseDot'
 require 'core.BiRNN'
+require 'optim'
 
 local model_utils = require 'core.model_utils'
 
@@ -136,6 +137,19 @@ function NMT:update(learningRate)
         scale = scale*self.maxNorm /gradNorm
     end
     self.params:add(self.gradParams:mul(-scale)) -- do it in-place
+end
+
+function NMT:learn(input, target)
+    local feval = function(x)
+        if self.params ~= x then
+            self.params:copy(x)
+        end
+        local f = self:forward(input, target)
+        self:backward(input, target)
+        return f, self.gradParams
+    end
+    local _, fx = optim.adamax(feval, self.params, self.config, self.state)
+    return fx[1]
 end
 
 function NMT:parameters()
