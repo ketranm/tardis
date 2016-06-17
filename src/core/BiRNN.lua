@@ -8,7 +8,7 @@ function BiRNN:__init(config)
     local bwrnn = nn.Sequential()
     bwrnn:add(nn.ReverseTensor(2, false)) -- we don't need gradInput
     bwrnn:add(nn.Transducer(config))
-    bwrnn:add(nn.ReverseTensor(2)) -- reverse output
+    bwrnn:add(nn.ReverseTensor(2, true)) -- reverse output
 
     self.view = nn.View(-1)
 
