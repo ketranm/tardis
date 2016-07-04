@@ -28,7 +28,6 @@ io:flush()
 
 
 local loader = DataLoader(config)
-print(loader)
 config.pad_idx = loader.pad_idx
 
 local model = nn.NMT(config)
@@ -36,8 +35,6 @@ local model = nn.NMT(config)
 if config.gpuid >= 0 then
     model:cuda()
 end
-
-
 
 -- prepare data
 function prepro(batch)
@@ -61,6 +58,7 @@ end
 
 function train()
     local exp = math.exp
+    local wordCount = 0
     for epoch = 1,config.maxEpoch do
         loader:readTrain()
         model:training()
@@ -69,22 +67,17 @@ function train()
         print('number of batches: ', nbatches)
         for i = 1, nbatches do
             local src, trg, nextTrg = prepro(loader:nextBatch())
-            --[[
-            local src, trg, nextTrg = prepro(loader:nextBatch())
-            nll = nll + model:forward({src, trg}, nextTrg)
-            model:backward({src, trg}, nextTrg)
-            model:update(config.learningRate)
-            
-            ]]
-            nll = nll + model:learn({src, trg}, nextTrg)
+            nll = nll + model:optimize({src, trg}, nextTrg)
             model:clearState()
+            wordCount = wordCount + trg:numel()
             if i % config.reportEvery == 0 then
                 xlua.progress(i, nbatches)
-                print(string.format('epoch %d\t train perplexity = %.4f', epoch, exp(nll/i)))
+                print(string.format('epoch %d\t train ppl = %.4f speed = %.4f word/sec', epoch, exp(nll/i),  wordCount / timer:time().real))
                 collectgarbage()
+                --timer:reset()
             end
         end
-
+        timer:reset()
         if epoch > config.decayAfter then
             config.learningRate = config.learningRate * config.decayRate
         end
