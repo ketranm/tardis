@@ -7,7 +7,7 @@ local tester = torch.Tester()
 function tests.forward()
     for i = 1, 10 do
         local d = torch.random(1, 3)
-        local rt = nn.ReverseTensor(d)
+        local rt = nn.ReverseTensor(d, false)
         local x = torch.randn(10, 20, 30)
         local y = rt:forward(x)
         local z = rt:forward(y)
@@ -19,7 +19,7 @@ end
 function tests.backward()
     for i = 1, 10 do
         local d = torch.random(1, 3)
-        local rt = nn.ReverseTensor(d)
+        local rt = nn.ReverseTensor(d, true)
         local x = torch.randn(10, 20, 30)
         local y = rt:forward(x)
         local dy = torch.randn(#y)
