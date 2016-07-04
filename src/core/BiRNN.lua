@@ -1,4 +1,3 @@
-require 'core.Transducer'
 require 'core.ReverseTensor'
 
 local BiRNN, parent = torch.class('nn.BiRNN', 'nn.Module')
@@ -90,6 +89,7 @@ end
 
 
 function BiRNN:getGrad(grad)
+    -- we never use this
     local gradState = {}
     for _, rnn in ipairs(self._fwrnns) do
         table.insert(gradState, rnn:getGrad())
