@@ -55,7 +55,7 @@ end
 
 function Transducer:lastStates()
     local state = {}
-    for _,rnn in ipairs(self._rnns) do
+    for _, rnn in ipairs(self._rnns) do
         table.insert(state, rnn:lastStates())
     end
     return state
