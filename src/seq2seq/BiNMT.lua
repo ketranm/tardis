@@ -1,7 +1,4 @@
---[[ Sequence to Sequence model with Attention
-url: http://www.aclweb.org/anthology/D15-1166
---]]
-
+-- using Bidirectional Encoder
 require 'core.Transducer'
 require 'core.GlimpseDot'
 require 'core.BiRNN'
@@ -22,12 +19,6 @@ function NMT:__init(config)
     -- over write option
     config.vocabSize = config.trgVocabSize
     self.decoder = nn.Transducer(config)
-
-    --self.linear = nn.Sequential() -- linear transformation of BiRNN output
-    --self.linear:add(nn.View(-1, 2 * config.hiddenSize))
-    --self.linear:add(nn.Linear(2 * config.hiddenSize, config.hiddenSize))
-    --self.view = nn.View(-1)
-    --self.linear:add(self.view)
 
     self.glimpse = nn.GlimpseDot(config.hiddenSize)
 
