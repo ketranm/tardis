@@ -25,7 +25,6 @@ function SqueezeDiag:updateOutput(input)
     assert(input:size(3) == T)
     self.mask = self:get_index(N, T)
     self.output = input:gather(3, self.mask)
-    print(self.mask)
     return self.output
 end
 

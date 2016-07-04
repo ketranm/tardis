@@ -182,7 +182,7 @@ function DataLoader:text2Tensor(textFile, tensorPrefix, shardSize, tracker)
     local buckets = {}
     local nbatches = 0
 
-    local diff = 5 -- maximum different in length of the target
+    local diff = 1 -- maximum different in length of the target
 
     for line in io.lines(textFile) do
         count = count + 1
