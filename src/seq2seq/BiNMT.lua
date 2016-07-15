@@ -130,7 +130,7 @@ function NMT:update(learningRate)
     self.params:add(self.gradParams:mul(-scale)) -- do it in-place
 end
 
-function NMT:learn(input, target)
+function NMT:optimize(input, target)
     local feval = function(x)
         if self.params ~= x then
             self.params:copy(x)
