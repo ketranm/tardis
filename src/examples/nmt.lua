@@ -5,7 +5,7 @@ require 'nn'
 -- make sure this script can be run from any folder
 
 require 'data.BitextLoader'
-require 'seq2seq.BiNMT' -- use attention by default
+require 'seq2seq.NMTA' -- use attention by default
 require 'search.Beam'
 
 
@@ -74,7 +74,6 @@ function train()
                 xlua.progress(i, nbatches)
                 print(string.format('epoch %d\t train ppl = %.4f speed = %.4f word/sec', epoch, exp(nll/i),  wordCount / timer:time().real))
                 collectgarbage()
-                --timer:reset()
             end
         end
         timer:reset()
@@ -123,7 +122,7 @@ else
     -- if reference is provided compute BLEU score of each n-best
     local refFile
     if config.refFile then
-        refFile = io.open(config.refFile, 'r')  
+        refFile = io.open(config.refFile, 'r')
     end
 
     -- create beam search object
@@ -132,7 +131,7 @@ else
     bs:use(model)
 
     local refLine
-    local nbLines = 0 
+    local nbLines = 0
     for line in io.lines(config.textFile) do
         nbLines = nbLines + 1
         if refFile then refLine = refFile:read() end
