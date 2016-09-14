@@ -1,4 +1,5 @@
 -- Beam search
+-- Ariana wrote major of this code
 local utils = require 'misc.utils'
 local BeamSearch = torch.class('BeamSearch')
 
@@ -224,4 +225,3 @@ function BeamSearch:prepareNbestList(nBest, completeHyps, completeHypsAtt, ref)
     end
     return nBestList
 end
-
