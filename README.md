@@ -5,6 +5,7 @@ Yes, it is the [TARDIS](https://en.wikipedia.org/wiki/TARDIS) from Dr. Who.
 
 Did I mention the TARDIS looks like a BLEU telephone box. Oops, I meant blue telephone box.
 
+We have switched to use [cudnn](https://github.com/soumith/cudnn.torch), updated code will be made available soon.
 ## Features
 
 - Standard Seq2seq model (we won't update this for now)
