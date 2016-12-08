@@ -34,6 +34,7 @@ The code is organized as follow
 - Ke Tran
 - Arianna Bisazza
 
-## Coding Guideline
-
-Strongly advised to follow this coding style: https://github.com/Olivine-Labs/lua-style-guide
+## Acknowledgments
+Our implementation utilizes code from the following:
+- https://github.com/jcjohnson/torch-rnn
+- https://github.com/wojzaremba/lstm
